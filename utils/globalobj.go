@@ -18,7 +18,7 @@ type GlobalObj struct {
 	// Zinx
 	Version        string `json:"Version"`        // 版本
 	MaxConn        int    `json:"MaxConn"`        // 允许的最大连接数
-	MaxPackageSize int    `json:"MaxPackageSize"` // 允许的数据包最大值
+	MaxPackageSize uint32 `json:"MaxPackageSize"` // 允许的数据包最大值
 }
 
 // 定义全局的对外GlobalObj
