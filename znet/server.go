@@ -1,6 +1,7 @@
 package znet
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"zinx/ziface"
@@ -18,6 +19,18 @@ type Server struct {
 	Port int
 }
 
+// CallBackToClient 定义当前客户端链接所绑定的handle API TODO(暂时写死，后续优化，由用户自定义)
+func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
+	// 回显业务
+	fmt.Println("[Conn Handle] CallBackToClient ...")
+	if _, err := conn.Write(data[:cnt]); err != nil {
+		fmt.Println("[Conn Handle] CallBackToClient Write err:", err)
+		return errors.New("CallBackToClient Write err:" + err.Error())
+	}
+
+	return nil
+}
+
 func (s *Server) Start() {
 	// 1.获取一个TCP的Addr
 	fmt.Printf("[Start] Server Listenner at IP :%s, Port:%d, is starting\n", s.IP, s.Port)
@@ -28,6 +41,7 @@ func (s *Server) Start() {
 			fmt.Printf("[Start] ResolveTCPAddr err:%s\n", err)
 			return
 		}
+
 		// 2.尝试监听服务器的地址
 		listenner, err := net.ListenTCP(s.IPVersion, addr)
 		if err != nil {
@@ -36,6 +50,8 @@ func (s *Server) Start() {
 		}
 
 		fmt.Printf("[Start] Server Listenner at IP :%s\n", s.IP)
+		var cid uint32
+		cid = 0
 		// 3.阻塞地等待客户端连接，处理客户端链接业务
 		for {
 			// 如果有客户端链接，阻塞会返回
@@ -45,23 +61,13 @@ func (s *Server) Start() {
 				continue
 			}
 			fmt.Printf("[Start] Accept TCP Conn:%s\n", conn.RemoteAddr().String())
-			// 客户端已建立链接，尝试一个512字节地回显业务
-			go func() {
-				for {
-					buf := make([]byte, 512)
-					cnt, err := conn.Read(buf)
-					if err != nil {
-						fmt.Printf("[Start] Read err:%s\n", err)
-						continue
-					}
-					fmt.Printf("[Start] Read Data:%s\n", string(buf[:cnt]))
-					// 尝试回显功能
-					if _, err := conn.Write(buf[:cnt]); err != nil {
-						fmt.Printf("[Start] Write Back err:%s\n", err)
-						continue
-					}
-				}
-			}()
+
+			// 将新连接的业务方法和Conn进行绑定，得到链接模块
+			dealConn := NewConnection(conn, cid, CallBackToClient)
+			cid++
+
+			// 启动
+			go dealConn.Start()
 		}
 	}()
 }
