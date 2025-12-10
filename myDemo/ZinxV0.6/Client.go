@@ -22,23 +22,12 @@ func main() {
 	for {
 		// 发送封包的Msg消息 MsgId为0
 		dp := znet.NewDataPack()
-		binaryMsg, err := dp.Pack(znet.NewMessage(0, []byte("ZinxV0.5 client Test Message")))
+		binaryMsg, err := dp.Pack(znet.NewMessage(0, []byte("ZinxV0.6 client Test Message")))
 		if err != nil {
 			fmt.Printf("client Pack err:%s\n", err)
 			return
 		}
 		_, err = conn.Write(binaryMsg)
-		if err != nil {
-			fmt.Printf("client Write err:%s\n", err)
-			return
-		}
-
-		binaryMsg2, err := dp.Pack(znet.NewMessage(1, []byte("Hello Zinx Test Message")))
-		if err != nil {
-			fmt.Printf("client Pack err:%s\n", err)
-			return
-		}
-		_, err = conn.Write(binaryMsg2)
 		if err != nil {
 			fmt.Printf("client Write err:%s\n", err)
 			return

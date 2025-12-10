@@ -18,18 +18,18 @@ type Connection struct {
 	isClosed bool
 	// 告知当前连接已经退出的channel
 	ExitChan chan bool
-	// 当前链接处理的方法Router
-	Router ziface.IRouter
+	// 消息的管理msgID与相对于的处理业务API MsgHandler
+	MsgHandler ziface.IMsgHandle
 }
 
 // NewConnection 初始化链接模块的方法
-func NewConnection(conn *net.TCPConn, connID uint32, router ziface.IRouter) *Connection {
+func NewConnection(conn *net.TCPConn, connID uint32, msgHandler ziface.IMsgHandle) *Connection {
 	return &Connection{
-		Conn:     conn,
-		ConnID:   connID,
-		isClosed: false,
-		ExitChan: make(chan bool, 1),
-		Router:   router,
+		Conn:       conn,
+		ConnID:     connID,
+		isClosed:   false,
+		ExitChan:   make(chan bool, 1),
+		MsgHandler: msgHandler,
 	}
 }
 
@@ -68,17 +68,13 @@ func (c *Connection) StartReader() {
 		msg.SetData(data)
 
 		// 得到当前链接的数据的Request对象
-		req := Request{
+		req := &Request{
 			Conn: c,
 			msg:  msg,
 		}
 
 		// 调用路由，从路由中找到注册的Conn对应的Router路由并执行
-		go func(request ziface.IRequest) {
-			c.Router.PreHandle(request)
-			c.Router.Handle(request)
-			c.Router.PostHandle(request)
-		}(&req)
+		go c.MsgHandler.DoMsgHandler(req)
 
 	}
 }
@@ -102,7 +98,11 @@ func (c *Connection) Stop() {
 	c.isClosed = true
 
 	// 关闭socket链接
-	c.Conn.Close()
+	err := c.Conn.Close()
+	if err != nil {
+		fmt.Println("Connection Stop Error", err)
+		panic(err)
+	}
 
 	// 回收资源
 	close(c.ExitChan)
