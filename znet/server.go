@@ -20,6 +20,15 @@ type Server struct {
 
 	// 当前server的消息管理模块，用来绑定MsgID和对应的处理业务API的关系
 	MsgHandler ziface.IMsgHandle
+
+	// 链接管理器
+	ConnMgr ziface.IConnManager
+
+	// 该Server创建链接之后自动调用的Hook函数
+	OnConnStart func(conn ziface.IConnection)
+
+	// 该Server销毁链接之后自动调用的Hook函数
+	OnConnStop func(conn ziface.IConnection)
 }
 
 func (s *Server) Start() {
@@ -55,9 +64,16 @@ func (s *Server) Start() {
 				continue
 			}
 			fmt.Printf("[Start] Accept TCP Conn:%s\n", conn.RemoteAddr().String())
+			// 判断当前最大连接个数是否超出
+			if s.ConnMgr.Len() >= utils.GlobalObject.MaxConn {
+				fmt.Printf("[Start] MaxConn:%d\n, 已超出最大范围", s.ConnMgr.Len())
+				// TODO 给用户响应一个错误信息（超出最大连接错误）
+				conn.Close()
+				continue
+			}
 
 			// 将新连接的业务方法和Conn进行绑定，得到链接模块
-			dealConn := NewConnection(conn, cid, s.MsgHandler)
+			dealConn := NewConnection(s, conn, cid, s.MsgHandler)
 			cid++
 
 			// 启动
@@ -67,7 +83,9 @@ func (s *Server) Start() {
 }
 
 func (s *Server) Stop() {
-	// TODO 将服务器的资源、状态或者一些已经开辟的链接信息进行停止
+	// 将服务器的资源、状态或者一些已经开辟的链接信息进行停止
+	fmt.Printf("[Stop] Server Listenner at IP :%s\n", s.IP)
+	s.ConnMgr.ClearConn()
 }
 
 func (s *Server) Serve() {
@@ -94,6 +112,37 @@ func NewServer() ziface.IServer {
 		IP:         utils.GlobalObject.Host,
 		Port:       utils.GlobalObject.TcpPort,
 		MsgHandler: NewMsgHandler(),
+		ConnMgr:    NewConnManager(),
 	}
 	return s
+}
+
+func (s *Server) GetConnMgr() ziface.IConnManager {
+	return s.ConnMgr
+}
+
+// SetOnConnStart 注册OnConnStart 钩子函数的方法
+func (s *Server) SetOnConnStart(hookFunc func(connection ziface.IConnection)) {
+	s.OnConnStart = hookFunc
+}
+
+// SetOnConnStop 注册OnConnStop 钩子函数的方法
+func (s *Server) SetOnConnStop(hookFunc func(connection ziface.IConnection)) {
+	s.OnConnStop = hookFunc
+}
+
+// CallOnConnStart 调用OnConnStart 钩子函数的方法
+func (s *Server) CallOnConnStart(conn ziface.IConnection) {
+	if s.OnConnStart != nil {
+		fmt.Println("[CallOnConnStart] OnConnStart is called")
+		s.OnConnStart(conn)
+	}
+}
+
+// CallOnConnStop 调用OnConnStop 钩子函数的方法
+func (s *Server) CallOnConnStop(conn ziface.IConnection) {
+	if s.OnConnStop != nil {
+		fmt.Println("[CallOnConnStop] OnConnStop is called")
+		s.OnConnStop(conn)
+	}
 }
