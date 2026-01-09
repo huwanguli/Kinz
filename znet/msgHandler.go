@@ -11,7 +11,7 @@ type MsgHandler struct {
 	Apis map[uint32]ziface.IRouter // 存放每一个MsgID所对应的处理方法
 	// 负责Worker读取任务的消息队列
 	TaskQueue []chan ziface.IRequest
-	// Worker工作池的数量
+	// Worker 工作池的数量
 	WorkerPoolSize uint32
 }
 
@@ -39,7 +39,7 @@ func (mh *MsgHandler) DoMsgHandler(request ziface.IRequest) {
 
 // AddRouter 添加路由器
 func (mh *MsgHandler) AddRouter(msgId uint32, router ziface.IRouter) {
-	// 判断当前msg绑定的api方法是否已经存在
+	// 判断当前 msg绑定的 api方法是否已经存在
 	if _, ok := mh.Apis[msgId]; ok {
 		// id 已注册
 		panic("repeat msgId : " + fmt.Sprint(msgId))
@@ -64,7 +64,7 @@ func (mh *MsgHandler) StartWorkerPool() {
 // StartOneWorker 启动一个Worker工作流程
 func (mh *MsgHandler) StartOneWorker(workerID int, taskQueue chan ziface.IRequest) {
 	fmt.Println("[StartOneWorker] workerID : " + fmt.Sprint(workerID))
-	// 不断的阻塞等待对应的channel的消息
+	// 不断的阻塞等待对应的 channel的消息
 	for {
 		select {
 		// 如果有消息传来，出列的就是一个客户端的Request，执行当前Request的业务

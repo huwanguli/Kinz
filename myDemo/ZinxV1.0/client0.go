@@ -22,7 +22,7 @@ func main() {
 	for {
 		// 发送封包的Msg消息 MsgId为0
 		dp := znet.NewDataPack()
-		binaryMsg, err := dp.Pack(znet.NewMessage(1, []byte("ZinxV0.9 client0 Test Message")))
+		binaryMsg, err := dp.Pack(znet.NewMessage(1, []byte("msgID：1 client0 Test Message")))
 		if err != nil {
 			fmt.Printf("client Pack err:%s\n", err)
 			return
@@ -64,6 +64,6 @@ func main() {
 		}
 
 		// cpu阻塞
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }

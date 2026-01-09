@@ -22,7 +22,7 @@ func main() {
 	for {
 		// 发送封包的Msg消息 MsgId为0
 		dp := znet.NewDataPack()
-		binaryMsg, err := dp.Pack(znet.NewMessage(0, []byte("ZinxV0.6 client Test Message")))
+		binaryMsg, err := dp.Pack(znet.NewMessage(0, []byte("msgID：0  client Test Message")))
 		if err != nil {
 			fmt.Printf("client Pack err:%s\n", err)
 			return
@@ -43,7 +43,7 @@ func main() {
 			fmt.Printf("client Read head err:%s\n", err)
 			return
 		}
-		// 将二进制的head拆包到msg结构体中
+		// 将二进制的 head拆包到 msg结构体中
 		msgHead, err := dp.Unpack(binaryHead)
 		if err != nil {
 			fmt.Printf("client Unpack err:%s\n", err)
@@ -63,7 +63,7 @@ func main() {
 			fmt.Println("-->Rev msg:", string(msg.Data), ",Id:", msg.Id, ",Len:", msg.DataLen)
 		}
 
-		// cpu阻塞
+		// cpu 阻塞
 		time.Sleep(1 * time.Second)
 	}
 }

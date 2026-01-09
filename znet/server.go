@@ -11,9 +11,9 @@ import (
 type Server struct {
 	// 服务器的名称
 	Name string
-	// 服务器绑定的ip版本
+	// 服务器绑定的 ip版本
 	IPVersion string
-	// 服务器监听的ip
+	// 服务器监听的 ip
 	IP string
 	// 服务器监听的端口
 	Port int
@@ -24,10 +24,10 @@ type Server struct {
 	// 链接管理器
 	ConnMgr ziface.IConnManager
 
-	// 该Server创建链接之后自动调用的Hook函数
+	// 该Server创建链接之后自动调用的 Hook函数
 	OnConnStart func(conn ziface.IConnection)
 
-	// 该Server销毁链接之后自动调用的Hook函数
+	// 该Server销毁链接之后自动调用的 Hook函数
 	OnConnStop func(conn ziface.IConnection)
 }
 
@@ -36,7 +36,7 @@ func (s *Server) Start() {
 	fmt.Printf("[Start] Server Listenner at IP :%s, Port:%d, is starting\n", s.IP, s.Port)
 
 	go func() {
-		// 开启消息队列及Worker工作池
+		// 开启消息队列及 Worker工作池
 		s.MsgHandler.StartWorkerPool()
 
 		addr, err := net.ResolveTCPAddr(s.IPVersion, fmt.Sprintf("%s:%d", s.IP, s.Port))
@@ -101,7 +101,7 @@ func (s *Server) Serve() {
 // AddRouter 添加路由
 func (s *Server) AddRouter(msgID uint32, r ziface.IRouter) {
 	s.MsgHandler.AddRouter(msgID, r)
-	fmt.Printf("[AddRouter] Router is %#v\n", s.MsgHandler)
+	//fmt.Printf("[AddRouter] Router is %#v\n", s.MsgHandler)
 }
 
 // NewServer 初始化Server模块

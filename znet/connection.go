@@ -5,26 +5,31 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"zinx/utils"
 	"zinx/ziface"
 )
 
 // Connection 链接模块
 type Connection struct {
-	// 当前Conn隶属于的Server
+	// 当前 Conn隶属于的 Server
 	TcpServer ziface.IServer
 	// socket TCP套接字
 	Conn *net.TCPConn
-	// 链接的ID
+	// 链接的 ID
 	ConnID uint32
 	// 链接的状态
 	isClosed bool
 	// 告知当前连接已经退出的channel (由Reader告知Writer)
 	ExitChan chan bool
-	// 无缓冲的管道，用于Reader 和 Writer之间的通信
+	// 无缓冲的管道，用于 Reader 和 Writer 之间的通信
 	msgChan chan []byte
 	// 消息的管理msgID与相对于的处理业务API MsgHandler
 	MsgHandler ziface.IMsgHandle
+	// 链接的属性集合
+	property map[string]interface{}
+	// 保护链接属性的锁
+	propertyLook sync.RWMutex
 }
 
 // NewConnection 初始化链接模块的方法
@@ -37,9 +42,10 @@ func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32, msgH
 		ExitChan:   make(chan bool, 1),
 		msgChan:    make(chan []byte),
 		MsgHandler: msgHandler,
+		property:   make(map[string]interface{}),
 	}
 
-	// 将conn加入connMgr的Map中
+	// 将 conn加入 connMgr的Map中
 	c.TcpServer.GetConnMgr().Add(c)
 
 	return c
@@ -79,7 +85,7 @@ func (c *Connection) StartReader() {
 		}
 		msg.SetData(data)
 
-		// 得到当前链接的数据的Request对象
+		// 得到当前链接的数据的 Request对象
 		req := &Request{
 			Conn: c,
 			msg:  msg,
@@ -87,7 +93,7 @@ func (c *Connection) StartReader() {
 
 		// 判断是否已经开启工作池
 		if utils.GlobalObject.WorkerPoolSize > 0 {
-			// 将request发送给对应的TaskQueue
+			// 将 request发送给对应的 TaskQueue
 			c.MsgHandler.SendMsgToTaskQueue(req)
 		} else {
 			// 若Worker池没有启动，则仍然由一个单独的goroutine承载
@@ -101,7 +107,7 @@ func (c *Connection) StartWriter() {
 	fmt.Println("[Writer Goroutine is running]", c.Conn.RemoteAddr().String())
 	defer fmt.Println("[Writer goroutine is stopped]", c.Conn.RemoteAddr().String())
 
-	// 不断地阻塞等待channel的消息
+	// 不断地阻塞等待 channel的消息
 	for {
 		select {
 		case data := <-c.msgChan:
@@ -111,7 +117,7 @@ func (c *Connection) StartWriter() {
 				return
 			}
 		case <-c.ExitChan:
-			// 代表Reader已经退出，则Writer也要推出
+			// 代表 Reader已经退出，则 Writer也要推出
 			return
 		}
 	}
@@ -139,19 +145,19 @@ func (c *Connection) Stop() {
 	}
 	c.isClosed = true
 
-	// 按照开发者的需要调用Hook函数
+	// 按照开发者的需要调用 Hook函数
 	c.TcpServer.CallOnConnStop(c)
 
-	// 关闭socket链接
+	// 关闭 socket链接
 	err := c.Conn.Close()
 	if err != nil {
 		fmt.Println("Connection Stop Error", err)
 		panic(err)
 	}
-	// 告知Writer关闭
+	// 告知 Writer关闭
 	c.ExitChan <- true
 
-	// 将Conn从ConnMgr中删除
+	// 将 Conn从ConnMgr中删除
 	c.TcpServer.GetConnMgr().Remove(c)
 
 	// 回收资源
@@ -186,4 +192,28 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	// 将数据发送给客户端
 	c.msgChan <- binaryMsg
 	return nil
+}
+
+// SetProperty 设置链接属性
+func (c *Connection) SetProperty(key string, value interface{}) {
+	c.propertyLook.Lock()
+	defer c.propertyLook.Unlock()
+	c.property[key] = value
+}
+
+// GetProperty 获取链接属性
+func (c *Connection) GetProperty(key string) (interface{}, error) {
+	c.propertyLook.RLock()
+	defer c.propertyLook.RUnlock()
+	if v, ok := c.property[key]; ok {
+		return v, nil
+	}
+	return nil, errors.New("property not exist")
+}
+
+// RemoveProperty 移除链接属性
+func (c *Connection) RemoveProperty(key string) {
+	c.propertyLook.Lock()
+	defer c.propertyLook.Unlock()
+	delete(c.property, key)
 }

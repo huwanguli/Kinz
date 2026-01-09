@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// 测试datapack封包拆包的单元测试
+// 测试 datapack 封包拆包的单元测试
 func TestDataPack(t *testing.T) {
 	// 模拟的服务器
 	// 创建socketTCP
@@ -17,7 +17,7 @@ func TestDataPack(t *testing.T) {
 		return
 	}
 
-	// go承载从客户端处理业务
+	// go 承载从客户端处理业务
 	go func() {
 		// 从客户端读取数据、拆包处理
 		for {
@@ -46,12 +46,12 @@ func TestDataPack(t *testing.T) {
 						return
 					}
 					if msgHead.GetDataLen() > 0 {
-						// msg有数据
+						// msg 有数据
 						// 第二次读取
 						msg := msgHead.(*Message)
 						msg.Data = make([]byte, msg.GetDataLen())
 
-						// 根据dataLen再次读取
+						// 根据 dataLen 再次读取
 						_, err := io.ReadFull(conn, msg.Data)
 						if err != nil {
 							fmt.Println("read msg data err:", err)

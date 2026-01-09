@@ -2,6 +2,7 @@ package ziface
 
 // IRouter 路由的抽象接口
 // 路由里的数据都是Request
+
 type IRouter interface {
 	// PreHandle 处理conn业务之前的钩子方法Hook
 	PreHandle(request IRequest)

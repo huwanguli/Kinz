@@ -17,9 +17,9 @@ func (connMgr *ConnManager) Add(conn ziface.IConnection) {
 	connMgr.connLock.Lock()
 	defer connMgr.connLock.Unlock()
 
-	// 将Conn加入到map中
+	// 将 Conn 加入到map中
 	connMgr.connections[conn.GetConnID()] = conn
-	fmt.Println("conn add to connMgr " + fmt.Sprint(connMgr.connections[conn.GetConnID()]) + "\nconnMgr Len() " + fmt.Sprint(connMgr.Len()))
+	//fmt.Println("conn add to connMgr " + fmt.Sprint(connMgr.connections[conn.GetConnID()]) + "\nconnMgr Len() " + fmt.Sprint(connMgr.Len()))
 }
 
 func (connMgr *ConnManager) Remove(conn ziface.IConnection) {
@@ -27,7 +27,7 @@ func (connMgr *ConnManager) Remove(conn ziface.IConnection) {
 	connMgr.connLock.Lock()
 	defer connMgr.connLock.Unlock()
 
-	// 删除Map中对应的链接
+	// 删除 Map 中对应的链接
 	delete(connMgr.connections, conn.GetConnID())
 	fmt.Println("conn remove from connMgr " + fmt.Sprint(connMgr.connections[conn.GetConnID()]))
 }
@@ -53,7 +53,7 @@ func (connMgr *ConnManager) ClearConn() {
 	connMgr.connLock.Lock()
 	defer connMgr.connLock.Unlock()
 
-	// 删除conn并停止conn工作
+	// 删除 conn 并停止 conn 工作
 	for connID, conn := range connMgr.connections {
 		// 停止
 		conn.Stop()
