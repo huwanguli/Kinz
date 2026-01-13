@@ -2,12 +2,12 @@ package znet
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
 	"zinx/utils"
 	"zinx/ziface"
+	"zinx/zlog"
 )
 
 // Connection 链接模块
@@ -55,9 +55,9 @@ func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32, msgH
 
 // StartReader 读数据的业务
 func (c *Connection) StartReader() {
-	fmt.Println("Reader Goroutine is running...", c.Conn.RemoteAddr().String())
+	zlog.L().InfoF("Reader Goroutine is running... %s", c.Conn.RemoteAddr().String())
 	// 退出时直接将该链接关闭
-	defer fmt.Println("Reader goroutine is stopped")
+	defer zlog.L().InfoF("Reader goroutine is stopped")
 	defer c.Stop()
 	// 处理业务
 	for {
@@ -66,14 +66,14 @@ func (c *Connection) StartReader() {
 		// 读取客户端的MSG HEAD 8个字节
 		headData := make([]byte, dp.GetHeadLen())
 		if _, err := io.ReadFull(c.GetTCPConnection(), headData); err != nil {
-			fmt.Println("read head data error", err)
+			zlog.L().ErrorF("read head data error : %s", err.Error())
 			break
 		}
 
 		// 拆包得到msgID和msgDataLen 放进一个msg消息对象中
 		msg, err := dp.Unpack(headData)
 		if err != nil {
-			fmt.Println("unpack data error", err)
+			zlog.L().ErrorF("unpack data error", err.Error())
 			break
 		}
 
@@ -82,7 +82,7 @@ func (c *Connection) StartReader() {
 		if msg.GetDataLen() > 0 {
 			data = make([]byte, msg.GetDataLen())
 			if _, err := io.ReadFull(c.GetTCPConnection(), data); err != nil {
-				fmt.Println("read data error", err)
+				zlog.L().ErrorF("read data error", err.Error())
 				break
 			}
 		}
@@ -107,8 +107,8 @@ func (c *Connection) StartReader() {
 
 // StartWriter 写消息的goroutine 专门发送给客户端消息的模块
 func (c *Connection) StartWriter() {
-	fmt.Println("[Writer Goroutine is running]", c.Conn.RemoteAddr().String())
-	defer fmt.Println("[Writer goroutine is stopped]", c.Conn.RemoteAddr().String())
+	zlog.L().InfoF("[Writer Goroutine is running] %s", c.Conn.RemoteAddr().String())
+	defer zlog.L().InfoF("[Writer goroutine is stopped] %s", c.Conn.RemoteAddr().String())
 
 	// 不断地阻塞等待 channel的消息
 	for {
@@ -116,7 +116,7 @@ func (c *Connection) StartWriter() {
 		case data := <-c.msgChan:
 			// 有数据要写给客户端
 			if _, err := c.Conn.Write(data); err != nil {
-				fmt.Println("write data error", err)
+				zlog.L().ErrorF("write data error", err.Error())
 				return
 			}
 		case <-c.ExitChan:
@@ -127,7 +127,7 @@ func (c *Connection) StartWriter() {
 }
 
 func (c *Connection) Start() {
-	fmt.Println("Connection Start().. ConnID = ", c.ConnID)
+	zlog.L().InfoF("Connection Start().. ConnID = %d", c.ConnID)
 
 	// 启动当前连接的读数据的业务
 	go c.StartReader()
@@ -140,7 +140,7 @@ func (c *Connection) Start() {
 }
 
 func (c *Connection) Stop() {
-	fmt.Println("Connection Stop().. ConnID = ", c.ConnID)
+	zlog.L().InfoF("Connection Stop().. ConnID = %d", c.ConnID)
 
 	// 如果当前链接已经关闭
 	if c.isClosed {
@@ -154,7 +154,7 @@ func (c *Connection) Stop() {
 	// 关闭 socket链接
 	err := c.Conn.Close()
 	if err != nil {
-		fmt.Println("Connection Stop Error", err)
+		zlog.L().ErrorF("Connection Stop Error", err.Error())
 		panic(err)
 	}
 	// 告知 Writer关闭
@@ -189,7 +189,7 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	dp := NewDataPack()
 	binaryMsg, err := dp.Pack(NewMessage(msgId, data))
 	if err != nil {
-		fmt.Println("Pack error msgId :=", msgId, err)
+		zlog.L().ErrorF("Pack error msgId :=", msgId, err.Error())
 		return err
 	}
 	// 将数据发送给客户端
