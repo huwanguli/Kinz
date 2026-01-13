@@ -14,6 +14,8 @@ import (
 type Connection struct {
 	// 当前 Conn隶属于的 Server
 	TcpServer ziface.IServer
+	// 当前Conn隶属于的 Client
+	TcpClient ziface.IClient
 	// socket TCP套接字
 	Conn *net.TCPConn
 	// 链接的 ID
@@ -74,6 +76,7 @@ func (c *Connection) StartReader() {
 			fmt.Println("unpack data error", err)
 			break
 		}
+
 		// 根据msgDataLen再次读取，并放进msg.Data中
 		var data []byte
 		if msg.GetDataLen() > 0 {

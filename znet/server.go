@@ -68,7 +68,7 @@ func (s *Server) Start() {
 			if s.ConnMgr.Len() >= utils.GlobalObject.MaxConn {
 				fmt.Printf("[Start] MaxConn:%d\n, 已超出最大范围", s.ConnMgr.Len())
 				// TODO 给用户响应一个错误信息（超出最大连接错误）
-				conn.Close()
+				_ = conn.Close()
 				continue
 			}
 

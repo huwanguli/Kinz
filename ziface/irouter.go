@@ -4,12 +4,10 @@ package ziface
 // 路由里的数据都是Request
 
 type IRouter interface {
-	// PreHandle 处理conn业务之前的钩子方法Hook
+	// PreHandle 处理conn业务之前的方法
 	PreHandle(request IRequest)
-
-	// Handle 处理Conn业务的主方法Hook
+	// Handle 处理Conn业务的主方法
 	Handle(request IRequest)
-
-	// PostHandle 处理Conn业务之后的方法Hook
+	// PostHandle 处理Conn业务之后的方法
 	PostHandle(request IRequest)
 }

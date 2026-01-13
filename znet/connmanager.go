@@ -19,7 +19,7 @@ func (connMgr *ConnManager) Add(conn ziface.IConnection) {
 
 	// 将 Conn 加入到map中
 	connMgr.connections[conn.GetConnID()] = conn
-	//fmt.Println("conn add to connMgr " + fmt.Sprint(connMgr.connections[conn.GetConnID()]) + "\nconnMgr Len() " + fmt.Sprint(connMgr.Len()))
+	// fmt.Println("conn add to connMgr " + fmt.Sprint(connMgr.connections[conn.GetConnID()]) + "\nConnMgr Len() " + fmt.Sprint(connMgr.Len()))
 }
 
 func (connMgr *ConnManager) Remove(conn ziface.IConnection) {
