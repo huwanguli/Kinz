@@ -1,5 +1,10 @@
 package ziface
 
+import (
+	"net/url"
+	"time"
+)
+
 type IClient interface {
 	Restart() // 重启
 	Start()   //启动
@@ -28,10 +33,20 @@ type IClient interface {
 	// GetMsgHandler 获取绑定的消息处理模块
 	GetMsgHandler() IMsgHandle
 
-	GetErrChan() <-chan error
+	StartHeartBeat(time.Duration)
+
+	StartHeartBeatWithOption(time.Duration, *HeartBeatOption)
+
+	GetLengthField() *LengthField
+	SetDecoder(IDecoder)
+	AddInterceptor(IInterceptor) //添加拦截器
+	GetErrChan() chan error
 
 	// SetName 设置名称
 	SetName(string)
 	// GetName 返回名称
 	GetName() string
+
+	SetUrl(url *url.URL)
+	GetUrl() *url.URL
 }

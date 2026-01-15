@@ -1,6 +1,9 @@
 package ziface
 
-import "net"
+import (
+	"context"
+	"net"
+)
 
 type IConnection interface {
 	// Start 启动链接
@@ -9,18 +12,35 @@ type IConnection interface {
 	// Stop 停止链接
 	Stop()
 
-	// GetTCPConnection 获取当前链接绑定的socket conn
-	GetTCPConnection() *net.TCPConn
+	// Context REPRO : 上下文
+	Context() context.Context
+
+	// GetName 等 REPRO : 新增功能
+	GetName() string
+	GetConnection() net.Conn
+
+	// GetTCPConnection 暂时不增加 Websocket功能
+	//GetWsConn() *websocket.Conn
+	// 获取当前链接绑定的socket conn // TODEL: 使用 GetConnection()
+	GetTCPConnection() net.Conn
 
 	// GetConnID 获取当前链接的ID
-	GetConnID() uint32
+	GetConnID() uint64
 
-	// GetRemoteAddr 获取远程的TCP状态 IP Port
-	GetRemoteAddr() net.Addr
-
-	// SendMsg 发送数据， 将数据发送给远程的客户端
-	SendMsg(msgId uint32, data []byte) error
-
+	GetConnIdStr() string
+	GetMsgHandler() IMsgHandle
+	GetWorkerID() uint32
+	// RemoteAddr 获取远程的TCP状态 IP Port
+	RemoteAddr() net.Addr
+	LocalAddr() net.Addr
+	LocalAddrString() string
+	RemoteAddrString() string
+	// Send 发送数据， 将数据发送给远程的客户端 无缓冲
+	Send(data []byte) error
+	SendToQueue(data []byte) error // 有缓冲
+	// SendMsg 旧方法，无缓冲
+	SendMsg(msgID uint32, data []byte) error
+	SendBuffMsg(msgID uint32, data []byte) error
 	// SetProperty 设置链接属性
 	SetProperty(key string, value interface{})
 
@@ -29,7 +49,12 @@ type IConnection interface {
 
 	// RemoveProperty 移除链接属性
 	RemoveProperty(key string)
-}
 
-// HandleFunc 定义一个处理链接业务的方法
-type HandleFunc func(*net.TCPConn, []byte, int) error
+	IsAlive() bool
+
+	SetHeartBeat(checker IHeartbeatChecker)
+
+	AddCloseCallback(handler, key interface{}, callback func())
+	RemoveCloseCallback(handler, key interface{})
+	InvokeCloseCallbacks()
+}

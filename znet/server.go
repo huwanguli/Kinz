@@ -3,6 +3,7 @@ package znet
 import (
 	"fmt"
 	"net"
+	"time"
 	"zinx/utils"
 	"zinx/ziface"
 )
@@ -21,6 +22,11 @@ type Server struct {
 	// 当前server的消息管理模块，用来绑定MsgID和对应的处理业务API的关系
 	MsgHandler ziface.IMsgHandle
 
+	//REPRO: 路由模式
+	RouterSlicesMode bool
+	// repro: 对象池模式
+	RequestPoolMode bool
+
 	// 链接管理器
 	ConnMgr ziface.IConnManager
 
@@ -29,6 +35,91 @@ type Server struct {
 
 	// 该Server销毁链接之后自动调用的 Hook函数
 	OnConnStop func(conn ziface.IConnection)
+
+	packet ziface.IDataPackd
+
+	exitChan chan struct{}
+
+	decoder ziface.IDecoder
+
+	hc ziface.IHeartbeatChecker
+
+	cID uint64
+}
+
+func (s *Server) AddRouterSlices(msgID uint32, router ...ziface.RouterHandler) ziface.IRouterSlices {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) Group(start, end uint32, Handlers ...ziface.RouterHandler) ziface.IGroupRouterSlices {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) Use(Handlers ...ziface.RouterHandler) ziface.IRouterSlices {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) GetOnConnStart() func(ziface.IConnection) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) GetOnConnStop() func(ziface.IConnection) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) GetPacket() ziface.IDataPack {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) GetMsgHandler() ziface.IMsgHandle {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SetPacket(pack ziface.IDataPack) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) StartHeartBeat(duration time.Duration) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SetHeartBeatWithOption(duration time.Duration, option *ziface.HeartBeatOption) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) GetHeartBeat() ziface.IHeartbeatChecker {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) GetLengthField() *ziface.LengthField {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SetDecoder(decoder ziface.IDecoder) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) AddInterceptor(interceptor ziface.IInterceptor) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) ServerName() string {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (s *Server) Start() {

@@ -6,3 +6,14 @@ type IDataPack interface {
 	Pack(msg IMessage) ([]byte, error) // 封包
 	Unpack([]byte) (IMessage, error)   // 拆包
 }
+
+const (
+	// ZinxDataPack 大端序
+	ZinxDataPack string = "zinx_pack_tlv_big_endian"
+	// ZinxDataPackOld 小端序
+	ZinxDataPackOld string = "zinx_pack_tlv_little_endian"
+)
+
+const (
+	ZinxMessage string = "zinx_message"
+)
