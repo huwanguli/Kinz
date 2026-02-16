@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"zinx/utils"
 	"zinx/ziface"
 )
@@ -24,7 +25,31 @@ type Connection struct {
 	// 无缓冲的管道，用于Reader 和 Writer之间的通信
 	msgChan chan []byte
 	// 消息的管理msgID与相对于的处理业务API MsgHandler
-	MsgHandler ziface.IMsgHandle
+	MsgHandler   ziface.IMsgHandle
+	property     map[string]interface{}
+	propertyLock sync.RWMutex
+}
+
+func (c *Connection) SetProperty(key string, value interface{}) {
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	c.property[key] = value
+}
+
+func (c *Connection) GetProperty(key string) (interface{}, error) {
+	c.propertyLock.RLock()
+	defer c.propertyLock.RUnlock()
+	if value, ok := c.property[key]; ok {
+		return value, nil
+	}
+
+	return nil, errors.New("no property found")
+}
+
+func (c *Connection) RemoveProperty(key string) {
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	delete(c.property, key)
 }
 
 // NewConnection 初始化链接模块的方法
@@ -37,6 +62,7 @@ func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32, msgH
 		ExitChan:   make(chan bool, 1),
 		msgChan:    make(chan []byte),
 		MsgHandler: msgHandler,
+		property:   make(map[string]interface{}),
 	}
 
 	// 将conn加入connMgr的Map中

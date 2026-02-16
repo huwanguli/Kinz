@@ -37,7 +37,7 @@ func (dp *DataPack) Pack(msg ziface.IMessage) ([]byte, error) {
 		return nil, err
 	}
 
-	// 写data数据
+	// 写 data 数据
 	if err := binary.Write(dataBuff, binary.LittleEndian, msg.GetData()); err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (dp *DataPack) Pack(msg ziface.IMessage) ([]byte, error) {
 
 // Unpack 拆包
 func (dp *DataPack) Unpack(binaryData []byte) (ziface.IMessage, error) {
-	// 创建一个从二进制数据的IOReader
+	// 创建一个从二进制数据的 IOReader
 	dataBuff := bytes.NewReader(binaryData)
 
 	// 解压Head的消息，得到dataLen 和 msgID

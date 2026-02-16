@@ -30,6 +30,7 @@ func (mh *MsgHandler) DoMsgHandler(request ziface.IRequest) {
 	handler, ok := mh.Apis[request.GetMsgID()]
 	if !ok {
 		fmt.Println("[DoMsgHandler] No Handler, MsgID: ", fmt.Sprint(request.GetMsgID()))
+		return
 	}
 	// 2.根据ID调度对应的router业务
 	handler.PreHandle(request)
