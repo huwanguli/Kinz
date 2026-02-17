@@ -10,8 +10,8 @@ import (
 // 一些参数也可以使用zinx.json由用户进行配置
 
 type GlobalObj struct {
-	TcpServer ziface.IServer // 当前Zinx全局的Server对象
-	Host      string         `json:"Host"`    // 当前主机监听的IP
+	TcpServer ziface.IServer // 当前 Zinx 全局的 Server 对象
+	Host      string         `json:"Host"`    // 当前主机监听的 IP
 	TcpPort   int            `json:"TcpPort"` // 当前主机监听的端口号
 	Name      string         `json:"Name"`    // 当前服务器的名称
 
@@ -19,11 +19,11 @@ type GlobalObj struct {
 	Version          string `json:"Version"`        // 版本
 	MaxConn          int    `json:"MaxConn"`        // 允许的最大连接数
 	MaxPackageSize   uint32 `json:"MaxPackageSize"` // 允许的数据包最大值
-	WorkerPoolSize   uint32 `json:"WorkerPoolSize"` // 当前业务工作池的goroutine的数量
+	WorkerPoolSize   uint32 `json:"WorkerPoolSize"` // 当前业务工作池的 goroutine 的数量
 	MaxWorkerTaskLen uint32 // 允许开辟的最大工作池数量
 }
 
-// 定义全局的对外GlobalObj
+// 定义全局的对外 GlobalObj
 
 var GlobalObject *GlobalObj
 
@@ -33,7 +33,7 @@ func (g *GlobalObj) Reload() {
 	if err != nil {
 		panic(err)
 	}
-	// 将json文件数据绑定到对象中
+	// 将 json 文件数据绑定到对象中
 	err = json.Unmarshal(data, g)
 	if err != nil {
 		panic(err)

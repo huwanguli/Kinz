@@ -52,16 +52,16 @@ func (dp *DataPack) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 解压Head的消息，得到dataLen 和 msgID
 	msg := &Message{}
 
-	// 读取dataLen
+	// 读取 dataLen
 	if err := binary.Read(dataBuff, binary.LittleEndian, &msg.DataLen); err != nil {
 		return nil, err
 	}
 
-	// 读取msgID
+	// 读取 msgID
 	if err := binary.Read(dataBuff, binary.LittleEndian, &msg.Id); err != nil {
 		return nil, err
 	}
-	// 判断dataLen的长度是否超出了允许的最大长度
+	// 判断 dataLen 的长度是否超出了允许的最大长度
 	if utils.GlobalObject.MaxPackageSize > 0 && msg.DataLen > utils.GlobalObject.MaxPackageSize {
 		return nil, errors.New("too large msg data")
 	}

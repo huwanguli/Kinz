@@ -144,4 +144,65 @@ func (p *Player) SyncSurrounding() {
 	}
 
 	// 3. 将周围的全部玩家的位置信息发给当前的玩家MsgID：202
+	// 3.1 组建消息
+	playersProtoMsg := make([]*pb.Player, 0, len(players))
+	for _, player := range players {
+		// 制作一个 message Player
+		p := &pb.Player{
+			Pid: player.Pid,
+			P: &pb.Position{
+				X: player.X,
+				Y: player.Y,
+				Z: player.Z,
+				V: player.V,
+			},
+		}
+
+		playersProtoMsg = append(playersProtoMsg, p)
+	}
+
+	proto202Msg := &pb.SyncPlayers{
+		Ps: playersProtoMsg[:],
+	}
+	// 3.2 将组建好的消息发送给当前玩家客户端
+	p.SendMsg(202, proto202Msg)
+
+}
+
+// UpdatePos 广播当前玩家的位置信息
+func (p *Player) UpdatePos(x, y, z, v float32) {
+	// 更新当前玩家 player 的位置坐标
+	p.X = x
+	p.Y = y
+	p.Z = z
+	p.V = v
+	// 组建广播 proto 协议
+	protoMsg := &pb.BroadCast{
+		Pid: p.Pid,
+		Tp:  4, // 移动之后的坐标信息
+		Data: &pb.BroadCast_P{
+			P: &pb.Position{
+				X: p.X,
+				Y: p.Y,
+				Z: p.Z,
+				V: p.V,
+			},
+		},
+	}
+	// 获取当前玩家的周边玩家（九宫格）
+	players := p.GetSurroundingPlayers()
+	// 发送位置消息
+	for _, player := range players {
+		player.SendMsg(200, protoMsg)
+	}
+}
+
+func (p *Player) GetSurroundingPlayers() []*Player {
+	// 得到当前 AOI 九宫格内的所有玩家 PID
+	pids := WorldMgrObj.AoiMgr.GetPidsByPos(p.X, p.Z)
+	players := make([]*Player, 0, len(pids))
+	for _, pid := range pids {
+		players = append(players, WorldMgrObj.GetPlayerByPid(int32(pid)))
+	}
+	return players
 }

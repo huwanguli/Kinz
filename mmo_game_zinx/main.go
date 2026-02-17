@@ -39,6 +39,7 @@ func main() {
 
 	// 注册一些路由业务
 	s.AddRouter(2, &apis.WorldChat{})
+	s.AddRouter(3, &apis.MoveApi{})
 	// 启动服务
 	s.Serve()
 }

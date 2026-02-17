@@ -17,7 +17,7 @@ func TestAOIManager_GetSurroundGridsByGid(t *testing.T) {
 
 	for gid, _ := range aoiMgr.grids {
 		grids := aoiMgr.GetSurroundGridsByGid(gid)
-		fmt.Println("gid: ", gid, "grids len = : ", len(grids))
+		fmt.Println("gid: ", gid, "grids len =", len(grids))
 		gIDs := make([]int, 0, len(grids))
 		for _, v := range grids {
 			gIDs = append(gIDs, v.GID)
