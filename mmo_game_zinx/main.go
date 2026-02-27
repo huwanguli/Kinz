@@ -30,12 +30,29 @@ func OnConnectionAdd(conn ziface.IConnection) {
 	fmt.Println("=====> Player Pid = ", player.Pid, "is arrived <=====")
 }
 
+// OnConnectionLost 给当前连接创建一个断开连接之前触发的 HOOK 函数
+func OnConnectionLost(conn ziface.IConnection) {
+	// 得到当前玩家周围的玩家
+	pid, err := conn.GetProperty("pid")
+	if err != nil {
+		fmt.Println("Get property pid error:", err)
+		return
+	}
+	player := core.WorldMgrObj.GetPlayerByPid(pid.(int32))
+	// 触发玩家下线
+	player.Offline()
+
+	fmt.Println("=====> Player Pid = ", player.Pid, "is offline <=====")
+
+}
+
 func main() {
 	// 创建 zinx server 句柄
 	s := znet.NewServer()
 
 	// 连接创建和销毁的 HOOK 钩子函数
 	s.SetOnConnStart(OnConnectionAdd)
+	s.SetOnConnStop(OnConnectionLost)
 
 	// 注册一些路由业务
 	s.AddRouter(2, &apis.WorldChat{})

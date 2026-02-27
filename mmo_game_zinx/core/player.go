@@ -206,3 +206,17 @@ func (p *Player) GetSurroundingPlayers() []*Player {
 	}
 	return players
 }
+
+func (p *Player) Offline() {
+	players := p.GetSurroundingPlayers()
+
+	// 封装消息
+	protoMsg := &pb.SyncPid{
+		Pid: p.Pid,
+	}
+	for _, player := range players {
+		player.SendMsg(201, protoMsg)
+	}
+
+	WorldMgrObj.RemovePlayerByPid(p.Pid)
+}
