@@ -2,16 +2,16 @@ package utils
 
 import (
 	"encoding/json"
-	"os"
+	"io/ioutil"
 	"zinx/ziface"
 )
 
-// 存储一切有关 Zinx 的全局参数，供其他模块使用
-// 一些参数也可以使用 zinx.json 由用户进行配置
+// 存储一切有关Zinx的全局参数，供其他模块使用
+// 一些参数也可以使用zinx.json由用户进行配置
 
 type GlobalObj struct {
-	TcpServer ziface.IServer // 当前Zinx全局的 Server 对象
-	Host      string         `json:"Host"`    // 当前主机监听的 IP
+	TcpServer ziface.IServer // 当前Zinx全局的Server对象
+	Host      string         `json:"Host"`    // 当前主机监听的IP
 	TcpPort   int            `json:"TcpPort"` // 当前主机监听的端口号
 	Name      string         `json:"Name"`    // 当前服务器的名称
 
@@ -19,21 +19,21 @@ type GlobalObj struct {
 	Version          string `json:"Version"`        // 版本
 	MaxConn          int    `json:"MaxConn"`        // 允许的最大连接数
 	MaxPackageSize   uint32 `json:"MaxPackageSize"` // 允许的数据包最大值
-	WorkerPoolSize   uint32 `json:"WorkerPoolSize"` // 当前业务工作池的 goroutine 的数量
+	WorkerPoolSize   uint32 `json:"WorkerPoolSize"` // 当前业务工作池的goroutine的数量
 	MaxWorkerTaskLen uint32 // 允许开辟的最大工作池数量
 }
 
-// 定义全局的对外 GlobalObj
+// 定义全局的对外GlobalObj
 
 var GlobalObject *GlobalObj
 
 // Reload 冲json中加载
 func (g *GlobalObj) Reload() {
-	data, err := os.ReadFile("conf/zinx.json")
+	data, err := ioutil.ReadFile("conf/zinx.json")
 	if err != nil {
 		panic(err)
 	}
-	// 将 json 文件数据绑定到对象中
+	// 将json文件数据绑定到对象中
 	err = json.Unmarshal(data, g)
 	if err != nil {
 		panic(err)

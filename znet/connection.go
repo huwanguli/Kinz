@@ -2,36 +2,54 @@ package znet
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
 	"zinx/utils"
 	"zinx/ziface"
-	"zinx/zlog"
 )
 
 // Connection 链接模块
 type Connection struct {
-	// 当前 Conn隶属于的 Server
+	// 当前Conn隶属于的Server
 	TcpServer ziface.IServer
-	// 当前Conn隶属于的 Client
-	TcpClient ziface.IClient
 	// socket TCP套接字
 	Conn *net.TCPConn
-	// 链接的 ID
+	// 链接的ID
 	ConnID uint32
 	// 链接的状态
 	isClosed bool
 	// 告知当前连接已经退出的channel (由Reader告知Writer)
 	ExitChan chan bool
-	// 无缓冲的管道，用于 Reader 和 Writer 之间的通信
+	// 无缓冲的管道，用于Reader 和 Writer之间的通信
 	msgChan chan []byte
 	// 消息的管理msgID与相对于的处理业务API MsgHandler
-	MsgHandler ziface.IMsgHandle
-	// 链接的属性集合
-	property map[string]interface{}
-	// 保护链接属性的锁
-	propertyLook sync.RWMutex
+	MsgHandler   ziface.IMsgHandle
+	property     map[string]interface{}
+	propertyLock sync.RWMutex
+}
+
+func (c *Connection) SetProperty(key string, value interface{}) {
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	c.property[key] = value
+}
+
+func (c *Connection) GetProperty(key string) (interface{}, error) {
+	c.propertyLock.RLock()
+	defer c.propertyLock.RUnlock()
+	if value, ok := c.property[key]; ok {
+		return value, nil
+	}
+
+	return nil, errors.New("no property found")
+}
+
+func (c *Connection) RemoveProperty(key string) {
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	delete(c.property, key)
 }
 
 // NewConnection 初始化链接模块的方法
@@ -47,7 +65,7 @@ func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32, msgH
 		property:   make(map[string]interface{}),
 	}
 
-	// 将 conn加入 connMgr的Map中
+	// 将conn加入connMgr的Map中
 	c.TcpServer.GetConnMgr().Add(c)
 
 	return c
@@ -55,9 +73,9 @@ func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32, msgH
 
 // StartReader 读数据的业务
 func (c *Connection) StartReader() {
-	zlog.L().InfoF("Reader Goroutine is running... %s", c.Conn.RemoteAddr().String())
+	fmt.Println("Reader Goroutine is running...", c.Conn.RemoteAddr().String())
 	// 退出时直接将该链接关闭
-	defer zlog.L().InfoF("Reader goroutine is stopped")
+	defer fmt.Println("Reader goroutine is stopped")
 	defer c.Stop()
 	// 处理业务
 	for {
@@ -66,29 +84,28 @@ func (c *Connection) StartReader() {
 		// 读取客户端的MSG HEAD 8个字节
 		headData := make([]byte, dp.GetHeadLen())
 		if _, err := io.ReadFull(c.GetTCPConnection(), headData); err != nil {
-			zlog.L().ErrorF("read head data error : %s", err.Error())
+			fmt.Println("read head data error", err)
 			break
 		}
 
 		// 拆包得到msgID和msgDataLen 放进一个msg消息对象中
 		msg, err := dp.Unpack(headData)
 		if err != nil {
-			zlog.L().ErrorF("unpack data error", err.Error())
+			fmt.Println("unpack data error", err)
 			break
 		}
-
 		// 根据msgDataLen再次读取，并放进msg.Data中
 		var data []byte
 		if msg.GetDataLen() > 0 {
 			data = make([]byte, msg.GetDataLen())
 			if _, err := io.ReadFull(c.GetTCPConnection(), data); err != nil {
-				zlog.L().ErrorF("read data error", err.Error())
+				fmt.Println("read data error", err)
 				break
 			}
 		}
 		msg.SetData(data)
 
-		// 得到当前链接的数据的 Request对象
+		// 得到当前链接的数据的Request对象
 		req := &Request{
 			Conn: c,
 			msg:  msg,
@@ -96,7 +113,7 @@ func (c *Connection) StartReader() {
 
 		// 判断是否已经开启工作池
 		if utils.GlobalObject.WorkerPoolSize > 0 {
-			// 将 request发送给对应的 TaskQueue
+			// 将request发送给对应的TaskQueue
 			c.MsgHandler.SendMsgToTaskQueue(req)
 		} else {
 			// 若Worker池没有启动，则仍然由一个单独的goroutine承载
@@ -107,27 +124,27 @@ func (c *Connection) StartReader() {
 
 // StartWriter 写消息的goroutine 专门发送给客户端消息的模块
 func (c *Connection) StartWriter() {
-	zlog.L().InfoF("[Writer Goroutine is running] %s", c.Conn.RemoteAddr().String())
-	defer zlog.L().InfoF("[Writer goroutine is stopped] %s", c.Conn.RemoteAddr().String())
+	fmt.Println("[Writer Goroutine is running]", c.Conn.RemoteAddr().String())
+	defer fmt.Println("[Writer goroutine is stopped]", c.Conn.RemoteAddr().String())
 
-	// 不断地阻塞等待 channel的消息
+	// 不断地阻塞等待channel的消息
 	for {
 		select {
 		case data := <-c.msgChan:
 			// 有数据要写给客户端
 			if _, err := c.Conn.Write(data); err != nil {
-				zlog.L().ErrorF("write data error", err.Error())
+				fmt.Println("write data error", err)
 				return
 			}
 		case <-c.ExitChan:
-			// 代表 Reader已经退出，则 Writer也要推出
+			// 代表Reader已经退出，则Writer也要推出
 			return
 		}
 	}
 }
 
 func (c *Connection) Start() {
-	zlog.L().InfoF("Connection Start().. ConnID = %d", c.ConnID)
+	fmt.Println("Connection Start().. ConnID = ", c.ConnID)
 
 	// 启动当前连接的读数据的业务
 	go c.StartReader()
@@ -140,7 +157,7 @@ func (c *Connection) Start() {
 }
 
 func (c *Connection) Stop() {
-	zlog.L().InfoF("Connection Stop().. ConnID = %d", c.ConnID)
+	fmt.Println("Connection Stop().. ConnID = ", c.ConnID)
 
 	// 如果当前链接已经关闭
 	if c.isClosed {
@@ -148,19 +165,19 @@ func (c *Connection) Stop() {
 	}
 	c.isClosed = true
 
-	// 按照开发者的需要调用 Hook函数
+	// 按照开发者的需要调用Hook函数
 	c.TcpServer.CallOnConnStop(c)
 
-	// 关闭 socket链接
+	// 关闭socket链接
 	err := c.Conn.Close()
 	if err != nil {
-		zlog.L().ErrorF("Connection Stop Error", err.Error())
+		fmt.Println("Connection Stop Error", err)
 		panic(err)
 	}
-	// 告知 Writer关闭
+	// 告知Writer关闭
 	c.ExitChan <- true
 
-	// 将 Conn从ConnMgr中删除
+	// 将Conn从ConnMgr中删除
 	c.TcpServer.GetConnMgr().Remove(c)
 
 	// 回收资源
@@ -189,34 +206,10 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	dp := NewDataPack()
 	binaryMsg, err := dp.Pack(NewMessage(msgId, data))
 	if err != nil {
-		zlog.L().ErrorF("Pack error msgId :=", msgId, err.Error())
+		fmt.Println("Pack error msgId :=", msgId, err)
 		return err
 	}
 	// 将数据发送给客户端
 	c.msgChan <- binaryMsg
 	return nil
-}
-
-// SetProperty 设置链接属性
-func (c *Connection) SetProperty(key string, value interface{}) {
-	c.propertyLook.Lock()
-	defer c.propertyLook.Unlock()
-	c.property[key] = value
-}
-
-// GetProperty 获取链接属性
-func (c *Connection) GetProperty(key string) (interface{}, error) {
-	c.propertyLook.RLock()
-	defer c.propertyLook.RUnlock()
-	if v, ok := c.property[key]; ok {
-		return v, nil
-	}
-	return nil, errors.New("property not exist")
-}
-
-// RemoveProperty 移除链接属性
-func (c *Connection) RemoveProperty(key string) {
-	c.propertyLook.Lock()
-	defer c.propertyLook.Unlock()
-	delete(c.property, key)
 }
