@@ -8,3 +8,7 @@ bin/
 
 # legacy (deleted) references
 myDemo/
+
+
+# docs
+docs/INTERVIEW_GUIDE.md
