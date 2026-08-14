@@ -95,6 +95,9 @@ func Load(path string) (*Config, error) {
 
 func applyEnv(cfg *Config) error {
 	get := func(key string) (string, bool) { return os.LookupEnv(key) }
+	if v, ok := get("KINZ_NAME"); ok {
+		cfg.Name = v
+	}
 	if v, ok := get("KINZ_HOST"); ok {
 		cfg.Host = v
 	}
@@ -125,6 +128,27 @@ func applyEnv(cfg *Config) error {
 			return fmt.Errorf("kinz: invalid KINZ_WORKERPOOLSIZE %q", v)
 		}
 		cfg.WorkerPoolSize = uint32(n)
+	}
+	if v, ok := get("KINZ_MAXWORKERTASKLEN"); ok {
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			return fmt.Errorf("kinz: invalid KINZ_MAXWORKERTASKLEN %q", v)
+		}
+		cfg.MaxWorkerTaskLen = uint32(n)
+	}
+	if v, ok := get("KINZ_WRITEQUEUESIZE"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("kinz: invalid KINZ_WRITEQUEUESIZE %q", v)
+		}
+		cfg.WriteQueueSize = n
+	}
+	if v, ok := get("KINZ_WRITETIMEOUT"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("kinz: invalid KINZ_WRITETIMEOUT %q", v)
+		}
+		cfg.WriteTimeout = Duration(d)
 	}
 	return nil
 }

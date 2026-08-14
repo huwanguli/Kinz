@@ -96,20 +96,27 @@ func TestLoadUnreadableFile(t *testing.T) {
 }
 
 func TestLoadEnvOverride(t *testing.T) {
+	t.Setenv("KINZ_NAME", "my-server")
 	t.Setenv("KINZ_HOST", "10.0.0.1")
 	t.Setenv("KINZ_PORT", "7777")
 	t.Setenv("KINZ_MAXCONN", "32")
 	t.Setenv("KINZ_MAXPACKETSIZE", "8192")
 	t.Setenv("KINZ_WORKERPOOLSIZE", "4")
+	t.Setenv("KINZ_MAXWORKERTASKLEN", "512")
+	t.Setenv("KINZ_WRITEQUEUESIZE", "64")
+	t.Setenv("KINZ_WRITETIMEOUT", "3s")
 
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Host != "10.0.0.1" || cfg.Port != 7777 || cfg.MaxConn != 32 {
+	if cfg.Name != "my-server" || cfg.Host != "10.0.0.1" || cfg.Port != 7777 || cfg.MaxConn != 32 {
 		t.Fatalf("env not applied: %+v", cfg)
 	}
-	if cfg.MaxPacketSize != 8192 || cfg.WorkerPoolSize != 4 {
+	if cfg.MaxPacketSize != 8192 || cfg.WorkerPoolSize != 4 || cfg.MaxWorkerTaskLen != 512 {
+		t.Fatalf("env not applied: %+v", cfg)
+	}
+	if cfg.WriteQueueSize != 64 || time.Duration(cfg.WriteTimeout) != 3*time.Second {
 		t.Fatalf("env not applied: %+v", cfg)
 	}
 }
@@ -120,6 +127,9 @@ func TestLoadInvalidEnv(t *testing.T) {
 		{"KINZ_MAXCONN", "x"},
 		{"KINZ_MAXPACKETSIZE", "x"},
 		{"KINZ_WORKERPOOLSIZE", "x"},
+		{"KINZ_MAXWORKERTASKLEN", "x"},
+		{"KINZ_WRITEQUEUESIZE", "x"},
+		{"KINZ_WRITETIMEOUT", "x"},
 	} {
 		t.Setenv(kv[0], kv[1])
 		if _, err := Load(""); err == nil {
