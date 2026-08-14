@@ -43,7 +43,14 @@ type Connection struct {
 	wg           sync.WaitGroup
 	lastActivity atomic.Int64
 
-	hb kiface.IHeartbeatChecker
+	// started records that Start has launched the reader/writer goroutines.
+	// wg.Add happens in NewConnection (before the object is published to any
+	// goroutine), so Stop's wg.Wait never races with an Add; started only
+	// decides whether there is anything to wait for.
+	started atomic.Bool
+
+	hb   kiface.IHeartbeatChecker
+	hbMu sync.Mutex // guards hb (Start writes, stopOnce reads)
 
 	property     map[string]interface{}
 	propertyLock sync.RWMutex
@@ -68,6 +75,9 @@ func NewConnection(host connHost, conn net.Conn, connID uint64,
 		property: make(map[string]interface{}),
 	}
 	c.state.Store(stateCreated)
+	// Count both goroutines up front: NewConnection happens-before any other
+	// goroutine can reach Stop, so wg.Add can never race with wg.Wait.
+	c.wg.Add(2)
 	c.touch()
 	return c
 }
@@ -80,10 +90,17 @@ func (c *Connection) Start() {
 	if tpl := c.server.GetHeartBeat(); tpl != nil {
 		hb := tpl.Clone()
 		hb.BindConn(c)
-		c.hb = hb
-		hb.Start()
+		c.hbMu.Lock()
+		// A concurrent Stop may have closed the connection while we cloned
+		// the template; in that case skip the heartbeat entirely so its
+		// goroutine cannot leak (stopOnce has already run and won't stop it).
+		if c.state.Load() == stateRunning {
+			c.hb = hb
+			hb.Start()
+		}
+		c.hbMu.Unlock()
 	}
-	c.wg.Add(2)
+	c.started.Store(true)
 	go c.startReader()
 	go c.startWriter()
 	c.server.CallOnConnStart(c)
@@ -145,8 +162,12 @@ func (c *Connection) stopOnce() {
 	c.closeOnce.Do(func() {
 		c.state.Store(stateClosed)
 		c.server.CallOnConnStop(c)
-		if c.hb != nil {
-			c.hb.Stop()
+		c.hbMu.Lock()
+		hb := c.hb
+		c.hb = nil
+		c.hbMu.Unlock()
+		if hb != nil {
+			hb.Stop()
 		}
 		if c.metrics != nil {
 			c.metrics.active.Dec()
@@ -159,10 +180,14 @@ func (c *Connection) stopOnce() {
 }
 
 // Stop implements kiface.IConnection: idempotent graceful close that waits for
-// the reader/writer goroutines to exit.
+// the reader/writer goroutines to exit. When Stop wins the race against a
+// Start that never launched the goroutines (or a Start that was cancelled by
+// this Stop), there is nothing to wait for.
 func (c *Connection) Stop() {
 	c.stopOnce()
-	c.wg.Wait()
+	if c.started.Load() {
+		c.wg.Wait()
+	}
 }
 
 // GetConn implements kiface.IConnection.

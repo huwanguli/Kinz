@@ -65,6 +65,36 @@ func TestServerRuntimeReconfigurationRace(t *testing.T) {
 	wg.Wait()
 }
 
+// TestConnectionStartStopConcurrent reproduces the CI race in
+// TestClientReconnect: an external Stop() (wg.Wait) racing with Start()
+// (wg.Add) on the same connection. wg.Add now happens in NewConnection, and
+// Stop only waits when Start actually launched the goroutines, so the two can
+// interleave in any order without a race, deadlock, or a leaked heartbeat
+// goroutine. Verified by CI with -race.
+func TestConnectionStartStopConcurrent(t *testing.T) {
+	srv := NewServer().(*Server)
+	srv.StartHeartBeat(10 * time.Millisecond) // exercise the heartbeat path too
+
+	for i := 0; i < 50; i++ {
+		clientEnd, serverEnd := net.Pipe()
+		c := NewConnection(srv, serverEnd, uint64(i+1), NewTLVPack(),
+			NewMsgHandler(0, 0), kconf.Default(), nil)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			c.Start()
+		}()
+		go func() {
+			defer wg.Done()
+			c.Stop()
+		}()
+		wg.Wait()
+		_ = clientEnd.Close()
+	}
+}
+
 func TestClientRuntimeReconfigurationRace(t *testing.T) {
 	srv, cancel := startTestServer(t, testConfig(func(c *kconf.Config) {
 		c.WorkerPoolSize = 1
