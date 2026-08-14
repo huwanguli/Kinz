@@ -71,7 +71,10 @@ type Client struct {
 
 	metrics *kmetrics.Registry
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// stateMu guards the fields that are mutable at runtime and read from
+	// connection goroutines: name, codec, onConnStart, onConnStop, hbTemplate.
+	stateMu  sync.RWMutex
 	started  bool
 	stopping bool
 	cancel   context.CancelFunc
@@ -206,7 +209,7 @@ func (c *Client) dial(ctx context.Context) (*Connection, error) {
 		return nil, err
 	}
 
-	conn := NewConnection(c, raw, c.connID.Add(1), c.codec.Clone(), c.msgHandler, c.cfg,
+	conn := NewConnection(c, raw, c.connID.Add(1), c.GetCodec().Clone(), c.msgHandler, c.cfg,
 		newConnMetrics(c.metrics))
 
 	c.mu.Lock()
@@ -273,22 +276,46 @@ func (c *Client) AddRouterSlices(msgID uint32, handlers ...kiface.RouterHandler)
 }
 
 // SetOnConnStart implements kiface.IClient.
-func (c *Client) SetOnConnStart(f func(kiface.IConnection)) { c.onConnStart = f }
+func (c *Client) SetOnConnStart(f func(kiface.IConnection)) {
+	c.stateMu.Lock()
+	c.onConnStart = f
+	c.stateMu.Unlock()
+}
 
 // SetOnConnStop implements kiface.IClient.
-func (c *Client) SetOnConnStop(f func(kiface.IConnection)) { c.onConnStop = f }
+func (c *Client) SetOnConnStop(f func(kiface.IConnection)) {
+	c.stateMu.Lock()
+	c.onConnStop = f
+	c.stateMu.Unlock()
+}
 
 // GetOnConnStart implements kiface.IClient.
-func (c *Client) GetOnConnStart() func(kiface.IConnection) { return c.onConnStart }
+func (c *Client) GetOnConnStart() func(kiface.IConnection) {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.onConnStart
+}
 
 // GetOnConnStop implements kiface.IClient.
-func (c *Client) GetOnConnStop() func(kiface.IConnection) { return c.onConnStop }
+func (c *Client) GetOnConnStop() func(kiface.IConnection) {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.onConnStop
+}
 
 // SetCodec implements kiface.IClient.
-func (c *Client) SetCodec(codec kiface.ICodec) { c.codec = codec }
+func (c *Client) SetCodec(codec kiface.ICodec) {
+	c.stateMu.Lock()
+	c.codec = codec
+	c.stateMu.Unlock()
+}
 
 // GetCodec implements kiface.IClient.
-func (c *Client) GetCodec() kiface.ICodec { return c.codec }
+func (c *Client) GetCodec() kiface.ICodec {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.codec
+}
 
 // GetMsgHandler implements kiface.IClient.
 func (c *Client) GetMsgHandler() kiface.IMsgHandle { return c.msgHandler }
@@ -318,31 +345,45 @@ func (c *Client) StartHeartBeatWithOption(interval time.Duration, option *kiface
 			tpl.BindRouterSlices(option.HeartBeatMsgID, option.IRouterSlices...)
 		}
 	}
+	c.stateMu.Lock()
 	c.hbTemplate = tpl
+	c.stateMu.Unlock()
 }
 
 // SetName implements kiface.IClient.
-func (c *Client) SetName(name string) { c.name = name }
+func (c *Client) SetName(name string) {
+	c.stateMu.Lock()
+	c.name = name
+	c.stateMu.Unlock()
+}
 
 // GetName implements kiface.IClient.
-func (c *Client) GetName() string { return c.name }
+func (c *Client) GetName() string {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.name
+}
 
 // connHost implementation ---------------------------------------------------
 
 // GetHeartBeat implements connHost.
-func (c *Client) GetHeartBeat() kiface.IHeartbeatChecker { return c.hbTemplate }
+func (c *Client) GetHeartBeat() kiface.IHeartbeatChecker {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.hbTemplate
+}
 
 // CallOnConnStart implements connHost.
 func (c *Client) CallOnConnStart(conn kiface.IConnection) {
-	if c.onConnStart != nil {
-		c.onConnStart(conn)
+	if f := c.GetOnConnStart(); f != nil {
+		f(conn)
 	}
 }
 
 // CallOnConnStop implements connHost: fires user hook and signals reconnection.
 func (c *Client) CallOnConnStop(conn kiface.IConnection) {
-	if c.onConnStop != nil {
-		c.onConnStop(conn)
+	if f := c.GetOnConnStop(); f != nil {
+		f(conn)
 	}
 	select {
 	case c.connGone <- struct{}{}:

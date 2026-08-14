@@ -63,7 +63,10 @@ type Server struct {
 	onConnStart func(kiface.IConnection)
 	onConnStop  func(kiface.IConnection)
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// stateMu guards the fields that are mutable at runtime and read from
+	// connection goroutines: codec, onConnStart, onConnStop, hbTemplate.
+	stateMu  sync.RWMutex
 	listener net.Listener
 	started  bool
 	closed   bool
@@ -234,7 +237,7 @@ func (s *Server) acceptLoop(ln net.Listener) {
 }
 
 func (s *Server) handleConn(conn net.Conn) error {
-	c := NewConnection(s, conn, s.connID.Add(1), s.codec.Clone(), s.msgHandler, s.cfg,
+	c := NewConnection(s, conn, s.connID.Add(1), s.GetCodec().Clone(), s.msgHandler, s.cfg,
 		newConnMetrics(s.metrics))
 	if err := s.connMgr.Add(c); err != nil {
 		return err // ErrServerFull
@@ -251,7 +254,7 @@ func (s *Server) rejectConn(conn net.Conn, cause error) error {
 	s.connsRejected.Inc()
 	klog.L().Warn("connection rejected", "remote", conn.RemoteAddr().String(), "cause", cause)
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Duration(s.cfg.WriteTimeout)))
-	wire, err := s.codec.Pack(NewMessage(kiface.ServerFullMsgID, []byte(cause.Error())))
+	wire, err := s.GetCodec().Pack(NewMessage(kiface.ServerFullMsgID, []byte(cause.Error())))
 	if err == nil {
 		_, _ = conn.Write(wire)
 	}
@@ -277,36 +280,60 @@ func (s *Server) Use(handlers ...kiface.RouterHandler) (kiface.IRouterSlices, er
 func (s *Server) GetConnMgr() kiface.IConnManager { return s.connMgr }
 
 // SetOnConnStart implements kiface.IServer.
-func (s *Server) SetOnConnStart(f func(kiface.IConnection)) { s.onConnStart = f }
+func (s *Server) SetOnConnStart(f func(kiface.IConnection)) {
+	s.stateMu.Lock()
+	s.onConnStart = f
+	s.stateMu.Unlock()
+}
 
 // SetOnConnStop implements kiface.IServer.
-func (s *Server) SetOnConnStop(f func(kiface.IConnection)) { s.onConnStop = f }
+func (s *Server) SetOnConnStop(f func(kiface.IConnection)) {
+	s.stateMu.Lock()
+	s.onConnStop = f
+	s.stateMu.Unlock()
+}
 
 // GetOnConnStart implements kiface.IServer.
-func (s *Server) GetOnConnStart() func(kiface.IConnection) { return s.onConnStart }
+func (s *Server) GetOnConnStart() func(kiface.IConnection) {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.onConnStart
+}
 
 // GetOnConnStop implements kiface.IServer.
-func (s *Server) GetOnConnStop() func(kiface.IConnection) { return s.onConnStop }
+func (s *Server) GetOnConnStop() func(kiface.IConnection) {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.onConnStop
+}
 
 // CallOnConnStart implements kiface.IServer.
 func (s *Server) CallOnConnStart(conn kiface.IConnection) {
-	if s.onConnStart != nil {
-		s.onConnStart(conn)
+	if f := s.GetOnConnStart(); f != nil {
+		f(conn)
 	}
 }
 
 // CallOnConnStop implements kiface.IServer.
 func (s *Server) CallOnConnStop(conn kiface.IConnection) {
-	if s.onConnStop != nil {
-		s.onConnStop(conn)
+	if f := s.GetOnConnStop(); f != nil {
+		f(conn)
 	}
 }
 
 // SetCodec implements kiface.IServer.
-func (s *Server) SetCodec(codec kiface.ICodec) { s.codec = codec }
+func (s *Server) SetCodec(codec kiface.ICodec) {
+	s.stateMu.Lock()
+	s.codec = codec
+	s.stateMu.Unlock()
+}
 
 // GetCodec implements kiface.IServer.
-func (s *Server) GetCodec() kiface.ICodec { return s.codec }
+func (s *Server) GetCodec() kiface.ICodec {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.codec
+}
 
 // GetMsgHandler implements kiface.IServer.
 func (s *Server) GetMsgHandler() kiface.IMsgHandle { return s.msgHandler }
@@ -339,7 +366,9 @@ func (s *Server) SetHeartBeatWithOption(interval time.Duration, option *kiface.H
 			tpl.BindRouterSlices(option.HeartBeatMsgID, option.IRouterSlices...)
 		}
 	}
+	s.stateMu.Lock()
 	s.hbTemplate = tpl
+	s.stateMu.Unlock()
 	// Route received heartbeat frames somewhere (liveness is tracked by the
 	// read path itself; a duplicate registration is tolerated).
 	_, _ = s.msgHandler.AddRouterSlices(tpl.MsgID(), HeartBeatDefaultHandle)
@@ -347,4 +376,8 @@ func (s *Server) SetHeartBeatWithOption(interval time.Duration, option *kiface.H
 
 // GetHeartBeat implements kiface.IServer: the heartbeat template (cloned per
 // connection).
-func (s *Server) GetHeartBeat() kiface.IHeartbeatChecker { return s.hbTemplate }
+func (s *Server) GetHeartBeat() kiface.IHeartbeatChecker {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.hbTemplate
+}

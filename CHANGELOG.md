@@ -8,6 +8,10 @@
 
 - `README.md`：GitHub 主页入口文档（特性、快速开始代码、架构图、性能概览、质量保障、示例与文档导航）
 
+### 修复
+
+- **数据竞争（CI `-race` 抓出）**：运行期重配 `Server`/`Client`（`StartHeartBeat`/`SetHeartBeatWithOption`、`SetOnConnStart/Stop`、`SetCodec`、`SetName`）与连接建立/关闭并发时，心跳模板、钩子、编解码器、名称等字段读写无同步。新增 `stateMu sync.RWMutex` 保护这些运行期可变字段（读路径 `GetHeartBeat`/`codec.Clone`/`CallOnConnStart`/`CallOnConnStop` 与写路径 setter 全部加锁）；回调在锁外执行避免用户回调内调用 setter 造成死锁。新增回归测试 `TestServerRuntimeReconfigurationRace` / `TestClientRuntimeReconfigurationRace`（CI 以 `-race` 验证）
+
 ## [v1.0.0] - 2026-08-14
 
 ### 发布（P6：测试补强 + 发布）
