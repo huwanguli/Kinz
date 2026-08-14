@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Copilot, Gemini CL
 
 ## Project Overview
 
-Kinz is a lightweight TCP server framework written in Go (Go 1.25), refactored from the legacy Zinx codebase into a production-ready framework. The refactor ran in phases P0–P6 (see `docs/superpowers/specs/2026-08-14-zinx-production-refactor-design.md`); the repository is at the **end of P5** (docs & AI-friendliness). P6 (test hardening + release) and post-release P7 (`kinzctl` codegen) remain.
+Kinz is a lightweight TCP server framework written in Go (Go 1.25), refactored from the legacy Zinx codebase into a production-ready framework. The refactor ran in phases P0–P6 (see `docs/superpowers/specs/2026-08-14-zinx-production-refactor-design.md`); the repository is at **v1.0.0 (end of P6)**, tagged and released. Post-release P7 (`kinzctl` codegen) remains a documented option, not started.
 
 Module name: `kinz`. Packages: `kiface` (contracts), `knet` (runtime), `klog` (slog logger), `kconf` (YAML config), `kpool` (sync.Pool buffers), `kmetrics` (prometheus/client_golang adapter), `kmcp` (optional MCP server on mark3labs/mcp-go).
 
@@ -37,7 +37,7 @@ go test -race ./...
 
 > Note: `go test -race` requires CGO + a C toolchain (gcc/ld). It does **not** run on this dev machine (no compiler installed); use CI (ubuntu) or install mingw. All other commands run locally.
 
-## Current State (end of P5)
+## Current State (v1.0.0, end of P6)
 
 - **Server** (`knet/server.go`): `Run(ctx)` / `Shutdown(ctx)` / `Serve(ctx)` lifecycle with graceful shutdown, `Address()`, max-conn rejection (sends `ServerFullMsgID` then closes), heartbeat template wiring, options (`WithConfig`/`WithMaxConn`/`WithName`/`WithTLS`), Prometheus `/metrics` via `AttachMetrics(addr)`, `GetMetrics()`.
 - **Connection** (`knet/connection.go`): reader/writer goroutines, buffered write queue with timeout, atomic liveness, idempotent `Stop` via `sync.Once`, pooled read buffer (`kpool`), per-connection codec clone, metrics counters. `GetConn()` returns `net.Conn` (plain TCP or TLS).
@@ -59,6 +59,7 @@ go test -race ./...
 - `docs/configuration.md` — kconf 字段、YAML、env、Option
 - `docs/getting-started.md` — 快速开始（服务端/客户端/中间件）
 - `docs/testing.md` — 测试命令、分布、覆盖率门禁
+- `docs/performance.md` — 基准测试基线（微基准/端到端吞吐/瓶颈分析，v1.0.0 实测数值）
 - `docs/mcp.md` — MCP 接入、工具/资源清单
 - `docs/faq.md` — 常见问题
 - `docs/production-checklist.md` — 部署、调参、监控、安全
@@ -72,7 +73,7 @@ go test -race ./...
 - **Errors**: use sentinel errors from `kiface`, wrap with `%w`. No panics in library code paths.
 - **Byte order**: a wire-protocol decision — always explicit `binary.ByteOrder`, configurable (`NewTLVPackWithOrder`); never probe host endianness.
 - **Logging**: use `klog` (slog). No `fmt.Printf` in framework code.
-- **Tests**: every feature ships its tests in the same commit. Current coverage: kmetrics 89.6% / klog 96.3% / knet 73.7% / kconf 86.2% / kpool 100% / kmcp 65.8% (P6 gate: core ≥ 70%).
+- **Tests**: every feature ships its tests in the same commit. Current coverage: kmetrics 89.6% / klog 96.3% / knet 74.0% / kconf 86.2% / kpool 100% / kmcp 82.4% (P6 gate: core ≥ 70%, all met). Fuzz targets: `FuzzTLVPackDecode` / `FuzzRingBuffer` / `FuzzLoadYAML`. Benchmark baselines live in `docs/performance.md` (regression reference).
 - **Naming**: framework brand Kinz; packages `kin*`; exported symbols get English doc comments.
 
 ## Directory Layout
@@ -88,7 +89,8 @@ kmetrics/      measurement layer over prometheus/client_golang
 kmcp/          optional MCP server (mark3labs/mcp-go, stdio/streamable HTTP)
 examples/      runnable demos (echo, chatroom, auth-middleware, mcp-stdio)
 docs/          architecture / protocol / configuration / getting-started / testing /
-               faq / mcp / production-checklist / superpowers specs+plans
+               performance / faq / mcp / production-checklist / INTERVIEW_GUIDE /
+               superpowers specs+plans
 .github/       CI reference workflow (not required to run locally)
 ```
 
@@ -102,3 +104,5 @@ Planned in later phases: `configs/` (kinz.yaml sample), `cmd/`, `kinzctl` codege
 - The `ICodec` seam replaced the old `IDecoder`+`IDataPack` pair — custom protocols implement one `ICodec`; `DataPack` was renamed to `TLVPack`.
 - The interceptor chain (`IInterceptor`/`Chain`) and the classic router (`IRouter`/`BaseRouter`) were removed — middleware (`Use`/`Group`) covers all their cases. Do not reintroduce a second pipeline mechanism.
 - `knet` integration tests bind `127.0.0.1:0` (ephemeral ports); they take ~6s due to the heartbeat-timeout case.
+- PowerShell mangles unquoted `-bench=.` (the `.` is parsed as an alias) — always quote: `-bench "."`. On Windows, `go tool cover -func` also wants an absolute profile path (see above).
+- `kmcp.ServeHTTP(addr)` mounts the MCP endpoint at `/mcp` (mcp-go default); the bare `Handler()` answers on any path you mount it on. Tests use `http://host:port/mcp` for the real listener.

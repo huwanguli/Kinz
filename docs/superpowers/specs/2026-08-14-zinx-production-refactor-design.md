@@ -343,8 +343,9 @@ kinz/
 
 ### Phase 6 — 测试补强 + 发布（P6）
 - 内容：单元/集成/模糊/基准测试补全、`INTERVIEW_GUIDE.md` 更新、CI 全绿、覆盖率门禁、CHANGELOG、v1.0.0 tag。
+- **P6 落地修订**：① 模糊测试落地 3 个 target（`FuzzTLVPackDecode`/`FuzzRingBuffer`/`FuzzLoadYAML`）；② 基准测试全量落地并产出基线（微基准 + 端到端吞吐 + 裸 TCP 基线），数值与方法论固化到 `docs/performance.md`；③ `kmcp.ServeStdio` 拆出可测内部方法 `serveStdio(in,out)`，`ServeHTTP` 端点路径 `/mcp` 与 mcp-go 默认一致（与裸 `Handler()` 语义不同，已文档化）；④ CI 增加覆盖率门禁（核心包 ≥70%）、fuzz 冒烟、bench 冒烟 job；`Makefile` 增加 bench/fuzz/cover-func 目标；⑤ kmcp 覆盖率 65.8% → 82.4%（补 get_connection/broadcast/ServeHTTP/WithVersion 用例）。
 - 新增测试：模糊测试、基准测试基线、剩余边界用例。
-- 退出标准：`go test -race ./...` 全绿；核心包覆盖率 ≥ 70%；fuzz 与 bench 可运行并有基线；CI 全绿。
+- 退出标准：`go test -race ./...` 全绿；核心包覆盖率 ≥ 70%；fuzz 与 bench 可运行并有基线；CI 全绿。**已达成，v1.0.0 发布。**
 
 ### Phase 7 — 代码生成器 kinzctl（发布后可选，P7）
 
