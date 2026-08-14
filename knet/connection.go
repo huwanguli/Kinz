@@ -89,14 +89,16 @@ func (c *Connection) Start() {
 	}
 	if tpl := c.server.GetHeartBeat(); tpl != nil {
 		hb := tpl.Clone()
-		hb.BindConn(c)
+		hb.BindConn(c) // SetHeartBeat writes c.hb under hbMu
 		c.hbMu.Lock()
 		// A concurrent Stop may have closed the connection while we cloned
-		// the template; in that case skip the heartbeat entirely so its
-		// goroutine cannot leak (stopOnce has already run and won't stop it).
+		// the template; in that case skip starting the heartbeat entirely so
+		// its goroutine cannot leak (stopOnce has already run and won't stop
+		// it) and drop the stale reference.
 		if c.state.Load() == stateRunning {
-			c.hb = hb
 			hb.Start()
+		} else {
+			c.hb = nil
 		}
 		c.hbMu.Unlock()
 	}
@@ -255,8 +257,13 @@ func (c *Connection) touch() {
 	c.lastActivity.Store(time.Now().UnixNano())
 }
 
-// SetHeartBeat implements kiface.IConnection.
-func (c *Connection) SetHeartBeat(hb kiface.IHeartbeatChecker) { c.hb = hb }
+// SetHeartBeat implements kiface.IConnection. The field is also read by
+// stopOnce on any goroutine, so it is guarded by hbMu.
+func (c *Connection) SetHeartBeat(hb kiface.IHeartbeatChecker) {
+	c.hbMu.Lock()
+	c.hb = hb
+	c.hbMu.Unlock()
+}
 
 // SetProperty implements kiface.IConnection.
 func (c *Connection) SetProperty(key string, value interface{}) {
