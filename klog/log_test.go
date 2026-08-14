@@ -81,3 +81,52 @@ func TestInfofCompatibility(t *testing.T) {
 		t.Fatalf("msg = %v, want 'ping 1'", rec["msg"])
 	}
 }
+
+func TestAddSource(t *testing.T) {
+	var buf bytes.Buffer
+	lg := New(Options{Output: &buf, AddSource: true})
+	lg.Info("with source")
+	// slog records the frame of the klog wrapper (log.go), proving AddSource works.
+	if !strings.Contains(buf.String(), "source=") {
+		t.Fatalf("output lacks source field: %q", buf.String())
+	}
+}
+
+func TestSetDefault(t *testing.T) {
+	old := L()
+	defer SetDefault(old)
+
+	var buf bytes.Buffer
+	SetDefault(New(Options{Output: &buf, JSON: true}))
+	if L() == old {
+		t.Fatal("SetDefault did not replace the default logger")
+	}
+	Info("via package func")
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("package func output not JSON: %v", err)
+	}
+	if rec["msg"] != "via package func" {
+		t.Fatalf("msg = %v, want 'via package func'", rec["msg"])
+	}
+}
+
+func TestPackageLevelFuncs(t *testing.T) {
+	old := L()
+	defer SetDefault(old)
+
+	var buf bytes.Buffer
+	SetDefault(New(Options{Output: &buf, Level: LevelDebug}))
+
+	Debug("d")
+	Warn("w")
+	ErrorF("e%d", 1)
+	InfoF("i%d", 2)
+
+	out := buf.String()
+	for _, want := range []string{"msg=d", "msg=w", "msg=e1", "msg=i2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q: %q", want, out)
+		}
+	}
+}
