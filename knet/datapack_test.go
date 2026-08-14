@@ -2,6 +2,7 @@ package knet
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -56,6 +57,34 @@ func TestMessageSetters(t *testing.T) {
 	}
 	if msg.GetRawData() != nil {
 		t.Fatal("Raw should be nil for a fresh message")
+	}
+}
+
+func TestDataPackBigEndian(t *testing.T) {
+	dp := NewDataPackWithOrder(binary.BigEndian)
+	msg := NewMessage(0x0102, []byte("be"))
+
+	wire, err := dp.Pack(msg)
+	if err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+	// Big-endian header: DataLen=2 as 00 00 00 02, MsgID=0x0102 as 00 00 01 02.
+	if wire[3] != 0x02 {
+		t.Fatalf("DataLen high byte = %d, want 2 (big-endian)", wire[3])
+	}
+	if wire[6] != 0x01 || wire[7] != 0x02 {
+		t.Fatalf("MsgID bytes = %x %x, want 01 02 (big-endian)", wire[6], wire[7])
+	}
+
+	unpacked, err := dp.Unpack(wire[:dp.GetHeadLen()])
+	if err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+	if unpacked.GetMsgID() != 0x0102 {
+		t.Fatalf("MsgID = %d, want 0x0102", unpacked.GetMsgID())
+	}
+	if unpacked.GetDataLen() != 2 {
+		t.Fatalf("DataLen = %d, want 2", unpacked.GetDataLen())
 	}
 }
 
