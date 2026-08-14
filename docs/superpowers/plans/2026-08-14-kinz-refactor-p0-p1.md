@@ -15,7 +15,9 @@
 - **每个 Task = 一个评审单元**。Task 内的小步骤（写测试→跑→实现→再跑→提交）连续执行，不单独暂停。
 - 每个 Task 完成后**暂停**，向用户汇报：改动文件清单、构建/测试/覆盖率输出、与本设计文档 §2 哲学的对应。**用户 review 通过后**才进入下一 Task。
 - **覆盖率要求**：
-  - 每个 Task 的新功能与其测试同批提交；
+  - **CI 不实际运行**：验证以本地命令（`go build` / `go vet` / `go test -race -cover`）为准；`.github/workflows/ci.yml` 仅作参考文件，不要求推送触发或保持运行。
+- **目录结构（Go 库惯例，根级包，非 pkg/ 布局）**：`pkg/` 在 golang-standards 官方 README 中明确为"非 Go 惯例"；库采用根级包（同 gin/echo/原版 zinx）。`INTERVIEW_GUIDE.md` 移入 `docs/`，`.idea/` 解除 git 跟踪，`examples/`/`configs/`/`cmd/` 在对应阶段创建。
+- 每个 Task 的新功能与其测试同批提交；
   - P1 目标：编解码层（`knet/message.go` + `knet/datapack.go`）行覆盖率 **≥ 80%**（`go tool cover -func` 验证）；桩代码不设覆盖率（无逻辑，P2 起核心包按阶段要求 ≥ 70%，P6 最终门禁）；
   - 每个 Task 的验证步骤都包含 `go test` 输出，覆盖率里程碑记录在 Task 5。
 - 预期构建状态已标注在每个 Task 末尾（Task 0–2 处于"预期 broken"，Task 3 首次转绿），避免 review 时误判。
@@ -138,9 +140,29 @@ git rm -r demo mmo_game_zinx utils
 git rm znet/datapack_test.go znet/server.go znet/connection.go znet/msgHandler.go znet/connmanager.go znet/heartbeat.go znet/client.go znet/request.go
 ```
 
-同时编辑 `.gitignore`，删除已失效的 `mmo_game_zinx/pb/build.sh` 与 `mmo_game_zinx/pb/build.bat` 两行（`myDemo/` 保留）。
+- [ ] **Step 2: 目录结构整理**
 
-- [ ] **Step 2: 模块改名 + 清理依赖**
+```bash
+git mv INTERVIEW_GUIDE.md docs/INTERVIEW_GUIDE.md
+git rm -r --cached .idea
+```
+
+更新 `.gitignore` 为：
+
+```
+# IDE
+.idea/
+
+# Go build/test artifacts
+*.out
+*.test
+bin/
+
+# legacy (deleted) references
+myDemo/
+```
+
+- [ ] **Step 3: 模块改名 + 清理依赖**
 
 修改 `go.mod` 为：
 
@@ -158,7 +180,7 @@ go mod tidy
 
 Expected: `go.mod` 如上；`go.sum` 中的 protobuf 条目被清除（或文件变空/消失）。
 
-- [ ] **Step 3: 包目录改名**
+- [ ] **Step 4: 包目录改名**
 
 ```bash
 git mv ziface kiface
@@ -167,7 +189,7 @@ git mv zlog klog
 git mv zinterceptor kinterceptor
 ```
 
-- [ ] **Step 4: 批量替换包声明与导入路径**
+- [ ] **Step 5: 批量替换包声明与导入路径**
 
 Run（PowerShell，仓库根；`kinz/utils` 会在 Task 3 随 datapack 重写一并消失）：
 
@@ -197,11 +219,11 @@ Get-ChildItem -Recurse -Filter *.go | Select-String -Pattern 'package zin|"zinx/
 
 Expected: 无输出（无残留 `zin` 字样）。注意 `kinterceptor/`、`klog/` 此步后即为最终形态（P2/P3 再改行为）。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
-git add kiface knet klog kinterceptor go.mod go.sum .gitignore
-git commit -m "chore: rename framework to kinz, remove demo/mmo/utils, drop protobuf dep"
+git add kiface knet klog kinterceptor go.mod go.sum .gitignore docs/INTERVIEW_GUIDE.md
+git commit -m "chore: rename framework to kinz, restructure repo, remove demo/mmo/utils"
 ```
 
 **Task 1 结束时的构建状态：预期 broken（kiface 仍为旧接口内容；knet/datapack.go 仍引用已删除的 utils 与旧方法名）。**
