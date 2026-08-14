@@ -9,10 +9,10 @@ type BaseRouter struct{}
 // 按需要实现方法即可
 
 // PreHandle 处理 Conn 业务之前的钩子方法Hook
-func (br *BaseRouter) PreHandle(request ziface.IRequest) {}
+func (br *BaseRouter) PreHandle(request kiface.IRequest) {}
 
 // Handle 处理Conn业务的主方法Hook
-func (br *BaseRouter) Handle(request ziface.IRequest) {}
+func (br *BaseRouter) Handle(request kiface.IRequest) {}
 
 // PostHandle 处理Conn业务之后的方法Hook
-func (br *BaseRouter) PostHandle(request ziface.IRequest) {}
+func (br *BaseRouter) PostHandle(request kiface.IRequest) {}

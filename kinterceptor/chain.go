@@ -5,16 +5,16 @@ import (
 )
 
 type Chain struct {
-	req          ziface.IcReq
+	req          kiface.IcReq
 	position     int
-	interceptors []ziface.IInterceptor
+	interceptors []kiface.IInterceptor
 }
 
-func (c *Chain) Request() ziface.IcReq {
+func (c *Chain) Request() kiface.IcReq {
 	return c.req
 }
 
-func (c *Chain) GetIMessage() ziface.IMessage {
+func (c *Chain) GetIMessage() kiface.IMessage {
 	req := c.Request()
 	if req == nil {
 		return nil
@@ -27,7 +27,7 @@ func (c *Chain) GetIMessage() ziface.IMessage {
 	return iRequest.GetMessage()
 }
 
-func (c *Chain) Proceed(req ziface.IcReq) ziface.IcResp {
+func (c *Chain) Proceed(req kiface.IcReq) kiface.IcResp {
 	if c.position < len(c.interceptors) {
 		chain := NewChain(c.interceptors, c.position+1, req)
 		interceptor := c.interceptors[c.position]
@@ -37,7 +37,7 @@ func (c *Chain) Proceed(req ziface.IcReq) ziface.IcResp {
 	return req
 }
 
-func (c *Chain) ProceedWithIMessage(iMessage ziface.IMessage, response ziface.IcReq) ziface.IcResp {
+func (c *Chain) ProceedWithIMessage(iMessage kiface.IMessage, response kiface.IcReq) kiface.IcResp {
 	if iMessage == nil || response == nil {
 		return c.Proceed(c.Request())
 	}
@@ -56,7 +56,7 @@ func (c *Chain) ProceedWithIMessage(iMessage ziface.IMessage, response ziface.Ic
 	return c.Proceed(iRequest)
 }
 
-func NewChain(list []ziface.IInterceptor, pos int, req ziface.IcReq) ziface.IChain {
+func NewChain(list []kiface.IInterceptor, pos int, req kiface.IcReq) kiface.IChain {
 	return &Chain{
 		req:          req,
 		position:     pos,
@@ -64,14 +64,14 @@ func NewChain(list []ziface.IInterceptor, pos int, req ziface.IcReq) ziface.ICha
 	}
 }
 
-func (c *Chain) ShouldIRequest(icReq ziface.IcReq) ziface.IRequest {
+func (c *Chain) ShouldIRequest(icReq kiface.IcReq) kiface.IRequest {
 	if icReq == nil {
 		return nil
 	}
 
 	switch icReq.(type) {
-	case ziface.IRequest:
-		return icReq.(ziface.IRequest)
+	case kiface.IRequest:
+		return icReq.(kiface.IRequest)
 	default:
 		return nil
 	}

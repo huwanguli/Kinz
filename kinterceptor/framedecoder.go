@@ -9,7 +9,7 @@ import (
 )
 
 type FrameDecoder struct {
-	ziface.LengthField
+	kiface.LengthField
 
 	LengthFieldEndOffset   int //长度字段结束位置的偏移量
 	failFast               bool
@@ -19,7 +19,7 @@ type FrameDecoder struct {
 	in                     []byte
 }
 
-func NewFrameDecoder(lf ziface.LengthField) *FrameDecoder {
+func NewFrameDecoder(lf kiface.LengthField) *FrameDecoder {
 	frameDecoder := new(FrameDecoder)
 	if lf.Order == nil {
 		frameDecoder.Order = binary.BigEndian

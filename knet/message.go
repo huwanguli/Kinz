@@ -1,39 +1,36 @@
 package knet
 
+// Message is the default IMessage implementation: a TLV payload container.
+// Fields are exported for direct decoder use (binary.Read needs field pointers).
 type Message struct {
-	Id      uint32 // 消息 ID
-	DataLen uint32 // 消息长度
-	Data    []byte // 消息内容
+	Id      uint32
+	DataLen uint32
+	Data    []byte
+	Raw     []byte
 }
 
+// NewMessage creates a Message with id and payload (DataLen derived).
 func NewMessage(id uint32, data []byte) *Message {
-	return &Message{
-		Id:      id,
-		DataLen: uint32(len(data)),
-		Data:    data,
-	}
+	return &Message{Id: id, DataLen: uint32(len(data)), Data: data}
 }
 
-func (m *Message) GetMsgId() uint32 {
-	return m.Id
-} // 获取消息 ID
+// GetMsgID returns the message id.
+func (m *Message) GetMsgID() uint32 { return m.Id }
 
-func (m *Message) GetDataLen() uint32 {
-	return m.DataLen
-} // 获取消息长度
+// GetDataLen returns the payload length.
+func (m *Message) GetDataLen() uint32 { return m.DataLen }
 
-func (m *Message) GetData() []byte {
-	return m.Data
-} // 获取消息内容
+// GetData returns the payload.
+func (m *Message) GetData() []byte { return m.Data }
 
-func (m *Message) SetMsgId(id uint32) {
-	m.Id = id
-} // 设置消息 ID
+// GetRawData returns the raw header bytes captured during Unpack.
+func (m *Message) GetRawData() []byte { return m.Raw }
 
-func (m *Message) SetData(data []byte) {
-	m.Data = data
-} // 设置消息内容
+// SetMsgID sets the message id.
+func (m *Message) SetMsgID(id uint32) { m.Id = id }
 
-func (m *Message) SetDataLen(len uint32) {
-	m.DataLen = len
-} // 设置消息长度
+// SetData sets the payload (DataLen is set by the decoder from the header).
+func (m *Message) SetData(data []byte) { m.Data = data }
+
+// SetDataLen sets the payload length.
+func (m *Message) SetDataLen(l uint32) { m.DataLen = l }

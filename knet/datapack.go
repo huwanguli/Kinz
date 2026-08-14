@@ -3,68 +3,63 @@ package knet
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
-	"zinx/utils"
+	"fmt"
+
 	"kinz/kiface"
 )
 
-// 封包拆包的模块
-// 直接面向TCP链接中的数据流
+// defaultMaxPacketSize caps a single packet payload when no config is set
+// (matches the historical default; Phase 2 wires it to kconf).
+const defaultMaxPacketSize uint32 = 4096
 
-type DataPack struct{}
+// DataPack implements the default TLV wire format (little-endian):
+// [DataLen:4][MsgID:4][Data:DataLen].
+type DataPack struct {
+	maxPacketSize uint32
+}
 
+// NewDataPack returns a DataPack with the default max packet size.
 func NewDataPack() *DataPack {
-	return &DataPack{}
+	return &DataPack{maxPacketSize: defaultMaxPacketSize}
 }
 
-// GetHeadLen 获取包头长度方法
-func (dp *DataPack) GetHeadLen() uint32 {
-	return 8 // ID + DataLen 各四个字节
+// GetHeadLen returns the header length in bytes.
+func (dp *DataPack) GetHeadLen() uint32 { return 8 }
+
+// Pack serializes msg into wire-format bytes.
+func (dp *DataPack) Pack(msg kiface.IMessage) ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, dp.GetHeadLen()+msg.GetDataLen()))
+	if err := binary.Write(buf, binary.LittleEndian, msg.GetDataLen()); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.LittleEndian, msg.GetMsgID()); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.LittleEndian, msg.GetData()); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
-// Pack 封包
-func (dp *DataPack) Pack(msg ziface.IMessage) ([]byte, error) {
-	// 创建一个存放字节的缓冲
-	dataBuff := bytes.NewBuffer([]byte{})
-
-	// 写dataLen
-	if err := binary.Write(dataBuff, binary.LittleEndian, msg.GetDataLen()); err != nil {
-		return nil, err
+// Unpack parses the header and returns a Message with id/dataLen set;
+// the payload must be read separately (see Phase 2 pipeline).
+func (dp *DataPack) Unpack(binaryData []byte) (kiface.IMessage, error) {
+	if len(binaryData) < int(dp.GetHeadLen()) {
+		return nil, fmt.Errorf("%w: header needs %d bytes, got %d",
+			kiface.ErrProtocol, dp.GetHeadLen(), len(binaryData))
 	}
-
-	// 写msgID
-	if err := binary.Write(dataBuff, binary.LittleEndian, msg.GetMsgId()); err != nil {
-		return nil, err
-	}
-
-	// 写 data 数据
-	if err := binary.Write(dataBuff, binary.LittleEndian, msg.GetData()); err != nil {
-		return nil, err
-	}
-	return dataBuff.Bytes(), nil
-}
-
-// Unpack 拆包
-func (dp *DataPack) Unpack(binaryData []byte) (ziface.IMessage, error) {
-	// 创建一个从二进制数据的 IOReader
-	dataBuff := bytes.NewReader(binaryData)
-
-	// 解压Head的消息，得到dataLen 和 msgID
+	reader := bytes.NewReader(binaryData[:dp.GetHeadLen()])
 	msg := &Message{}
-
-	// 读取 dataLen
-	if err := binary.Read(dataBuff, binary.LittleEndian, &msg.DataLen); err != nil {
+	if err := binary.Read(reader, binary.LittleEndian, &msg.DataLen); err != nil {
 		return nil, err
 	}
-
-	// 读取 msgID
-	if err := binary.Read(dataBuff, binary.LittleEndian, &msg.Id); err != nil {
+	if err := binary.Read(reader, binary.LittleEndian, &msg.Id); err != nil {
 		return nil, err
 	}
-	// 判断 dataLen 的长度是否超出了允许的最大长度
-	if utils.GlobalObject.MaxPackageSize > 0 && msg.DataLen > utils.GlobalObject.MaxPackageSize {
-		return nil, errors.New("too large msg data")
+	if dp.maxPacketSize > 0 && msg.DataLen > dp.maxPacketSize {
+		return nil, fmt.Errorf("%w: got %d bytes, max %d",
+			kiface.ErrTooLargePacket, msg.DataLen, dp.maxPacketSize)
 	}
-
+	msg.Raw = append([]byte(nil), binaryData[:dp.GetHeadLen()]...)
 	return msg, nil
 }

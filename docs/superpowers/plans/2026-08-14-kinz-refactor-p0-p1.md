@@ -20,7 +20,7 @@
 - 每个 Task 的新功能与其测试同批提交；
   - P1 目标：编解码层（`knet/message.go` + `knet/datapack.go`）行覆盖率 **≥ 80%**（`go tool cover -func` 验证）；桩代码不设覆盖率（无逻辑，P2 起核心包按阶段要求 ≥ 70%，P6 最终门禁）；
   - 每个 Task 的验证步骤都包含 `go test` 输出，覆盖率里程碑记录在 Task 5。
-- 预期构建状态已标注在每个 Task 末尾（Task 0–2 处于"预期 broken"，Task 3 首次转绿），避免 review 时误判。
+- 预期构建状态已标注在每个 Task 末尾（Task 0–2 预期 broken，Task 3 klog 可独立编译通过，Task 4 首次全绿），避免 review 时误判。
 
 ## 文件结构
 
@@ -40,7 +40,8 @@
 | `knet/interface_test.go` | 编译期接口断言 | 新建（P1） |
 | `kinterceptor/{chain,framedecoder,interceptor}.go` | 保留（改名 + 补 `GetLengthField`；错误化改造在 P2） | 改名（P1） |
 | `kinterceptor/interface_test.go` | 编译期接口断言 | 新建（P1） |
-| `klog/{ilog,log}.go` | 保留（仅改名；重写在 P3） | 改名（P1） |
+| `klog/ilog.go`、`klog/log.go` | `ILogger` 接口 + `log/slog` 实现（级别/格式/输出可配，无硬编码颜色） | 重写（P1，用户要求提前） |
+| `klog/log_test.go` | slog 级别过滤/JSON/With/InfoF 兼容测试 | 新建（P1） |
 | `CLAUDE.md` | 构建命令同步（完整重写在 P5） | 小改（P1 Task 5） |
 
 ---
@@ -779,7 +780,277 @@ git commit -m "refactor(kiface): redefine contract layer per convention-first ph
 
 ---
 
-## Task 3: knet 编解码层迁移（TLV + 单元测试）
+## Task 3: klog 重写（log/slog）
+
+> 用户要求将 klog 重写提前到 P1（原计划 P3）。`log/slog` 为标准库结构化日志，性能优于旧 zlog（惰性格式化、零分配路径、无硬编码颜色）。
+
+**Files:**
+- Rewrite: `klog/ilog.go`
+- Rewrite: `klog/log.go`
+- Create: `klog/log_test.go`
+
+- [ ] **Step 1: 写失败测试（定义目标 API）**
+
+创建 `klog/log_test.go`：
+
+```go
+package klog
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestDefaultLogger(t *testing.T) {
+	if L() == nil {
+		t.Fatal("L() returned nil")
+	}
+}
+
+func TestLevelFiltering(t *testing.T) {
+	var buf bytes.Buffer
+	lg := New(Options{Output: &buf, Level: LevelError})
+
+	lg.Info("should be filtered")
+	lg.Error("should be emitted")
+
+	if strings.Contains(buf.String(), "should be filtered") {
+		t.Fatal("Info was emitted despite LevelError")
+	}
+	if !strings.Contains(buf.String(), "should be emitted") {
+		t.Fatalf("Error not emitted, got: %q", buf.String())
+	}
+}
+
+func TestLevelVarDynamic(t *testing.T) {
+	var buf bytes.Buffer
+	lg := New(Options{Output: &buf, Level: LevelInfo})
+	lg.SetLevel(LevelWarn)
+	lg.Info("info line")
+	if strings.Contains(buf.String(), "info line") {
+		t.Fatal("Info emitted after raising level to Warn")
+	}
+}
+
+func TestJSONHandler(t *testing.T) {
+	var buf bytes.Buffer
+	lg := New(Options{Output: &buf, JSON: true})
+
+	lg.Info("hello", "key", "value")
+
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("output is not valid JSON: %v; got %q", err, buf.String())
+	}
+	if rec["msg"] != "hello" {
+		t.Fatalf("msg = %v, want hello", rec["msg"])
+	}
+	if rec["key"] != "value" {
+		t.Fatalf("key = %v, want value", rec["key"])
+	}
+}
+
+func TestWithFields(t *testing.T) {
+	var buf bytes.Buffer
+	lg := New(Options{Output: &buf, JSON: true})
+
+	lg.With("connID", 42).Info("conn event")
+
+	var rec map[string]any
+	_ = json.Unmarshal(buf.Bytes(), &rec)
+	if rec["connID"] != float64(42) {
+		t.Fatalf("connID = %v, want 42", rec["connID"])
+	}
+}
+
+func TestInfofCompatibility(t *testing.T) {
+	var buf bytes.Buffer
+	lg := New(Options{Output: &buf, JSON: true})
+
+	lg.InfoF("ping %d", 1)
+
+	var rec map[string]any
+	_ = json.Unmarshal(buf.Bytes(), &rec)
+	if rec["msg"] != "ping 1" {
+		t.Fatalf("msg = %v, want 'ping 1'", rec["msg"])
+	}
+}
+```
+
+- [ ] **Step 2: 运行测试，确认失败（API 不存在）**
+
+Run:
+
+```powershell
+go test ./klog/ -v
+```
+
+Expected: 编译失败——`Options`、`New`、`LevelError` 等未定义（旧 klog 无此 API）。预期红。
+
+- [ ] **Step 3: 实现 ILogger 接口**
+
+重写 `klog/ilog.go`：
+
+```go
+// Package klog provides the Kinz logging contract and a log/slog-based
+// default implementation. It is the logging seam: business code can inject
+// any ILogger via klog.SetDefault or a server option.
+package klog
+
+import "log/slog"
+
+// Level is a log severity level (alias of slog.Level).
+type Level = slog.Level
+
+// Predefined severity levels.
+const (
+	LevelDebug = slog.LevelDebug // -4
+	LevelInfo  = slog.LevelInfo  // 0
+	LevelWarn  = slog.LevelWarn  // 4
+	LevelError = slog.LevelError // 8
+)
+
+// ILogger is the framework's logging contract.
+type ILogger interface {
+	// Debug logs at debug level.
+	Debug(msg string, args ...any)
+	// Info logs at info level.
+	Info(msg string, args ...any)
+	// Warn logs at warn level.
+	Warn(msg string, args ...any)
+	// Error logs at error level.
+	Error(msg string, args ...any)
+	// InfoF logs a printf-formatted message at info level (legacy compatibility).
+	InfoF(format string, args ...any)
+	// ErrorF logs a printf-formatted message at error level (legacy compatibility).
+	ErrorF(format string, args ...any)
+	// With returns a logger with structured fields attached.
+	With(fields ...any) ILogger
+}
+```
+
+- [ ] **Step 4: 实现 slog 封装**
+
+重写 `klog/log.go`：
+
+```go
+package klog
+
+import (
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+)
+
+// Options configures a Logger.
+type Options struct {
+	// Level is the minimum severity to emit (default Info).
+	Level Level
+	// JSON selects the JSON handler instead of the text handler.
+	JSON bool
+	// AddSource includes the caller file:line in each record.
+	AddSource bool
+	// Output is the destination (default os.Stdout).
+	Output io.Writer
+}
+
+// Logger is the default ILogger implementation backed by log/slog.
+// Its level is dynamic: SetLevel takes effect immediately.
+type Logger struct {
+	l        *slog.Logger
+	levelVar *slog.LevelVar
+}
+
+// New creates a Logger from opts.
+func New(opts Options) *Logger {
+	if opts.Output == nil {
+		opts.Output = os.Stdout
+	}
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.Level(opts.Level))
+	handlerOpts := &slog.HandlerOptions{Level: levelVar, AddSource: opts.AddSource}
+
+	var handler slog.Handler
+	if opts.JSON {
+		handler = slog.NewJSONHandler(opts.Output, handlerOpts)
+	} else {
+		handler = slog.NewTextHandler(opts.Output, handlerOpts)
+	}
+	return &Logger{l: slog.New(handler), levelVar: levelVar}
+}
+
+// SetLevel adjusts the minimum severity dynamically.
+func (lg *Logger) SetLevel(level Level) { lg.levelVar.Set(slog.Level(level)) }
+
+// Debug implements ILogger.
+func (lg *Logger) Debug(msg string, args ...any) { lg.l.Debug(msg, args...) }
+
+// Info implements ILogger.
+func (lg *Logger) Info(msg string, args ...any) { lg.l.Info(msg, args...) }
+
+// Warn implements ILogger.
+func (lg *Logger) Warn(msg string, args ...any) { lg.l.Warn(msg, args...) }
+
+// Error implements ILogger.
+func (lg *Logger) Error(msg string, args ...any) { lg.l.Error(msg, args...) }
+
+// InfoF implements ILogger.
+func (lg *Logger) InfoF(format string, args ...any) {
+	lg.l.Info(fmt.Sprintf(format, args...))
+}
+
+// ErrorF implements ILogger.
+func (lg *Logger) ErrorF(format string, args ...any) {
+	lg.l.Error(fmt.Sprintf(format, args...))
+}
+
+// With implements ILogger.
+func (lg *Logger) With(fields ...any) ILogger {
+	return &Logger{l: lg.l.With(fields...), levelVar: lg.levelVar}
+}
+
+var defaultLogger = New(Options{})
+
+// L returns the package-level default logger.
+func L() ILogger { return defaultLogger }
+
+// SetDefault replaces the package-level default logger.
+func SetDefault(l ILogger) { defaultLogger = l }
+
+// Package-level convenience delegates to L().
+func Debug(msg string, args ...any) { L().Debug(msg, args...) }
+func Info(msg string, args ...any)  { L().Info(msg, args...) }
+func Warn(msg string, args ...any)  { L().Warn(msg, args...) }
+func Error(msg string, args ...any) { L().Error(msg, args...) }
+func InfoF(format string, args ...any) { L().InfoF(format, args...) }
+func ErrorF(format string, args ...any) { L().ErrorF(format, args...) }
+```
+
+- [ ] **Step 5: 运行测试，确认通过**
+
+Run:
+
+```powershell
+go test ./klog/ -v
+```
+
+Expected: 6 个测试全部 PASS。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add klog
+git commit -m "refactor(klog): rewrite with log/slog (levels, JSON, dynamic level)"
+```
+
+**Task 3 结束时的构建状态：klog 独立可编译、测试通过；全仓仍 broken（knet/datapack.go 引用已删除的 utils）。**
+
+---
+
+## Task 4: knet 编解码层迁移（TLV + 单元测试）
 
 **Files:**
 - Rewrite: `knet/message.go`
@@ -787,6 +1058,8 @@ git commit -m "refactor(kiface): redefine contract layer per convention-first ph
 - Rewrite: `knet/datapack_test.go`（替换旧手工脚本）
 
 - [ ] **Step 1: 写失败测试（定义目标 API）**
+
+> 覆盖率门禁要求：除往返/超限/短头外，追加 `TestMessageSetters` 与 `GetRawData` 断言，使 `message.go`/`datapack.go` 行覆盖 ≥ 80%。
 
 创建 `knet/datapack_test.go`：
 
@@ -824,8 +1097,31 @@ func TestDataPackRoundTrip(t *testing.T) {
 	if unpacked.GetDataLen() != uint32(len("hello kinz")) {
 		t.Fatalf("DataLen = %d, want %d", unpacked.GetDataLen(), len("hello kinz"))
 	}
+	if !bytes.Equal(unpacked.GetRawData(), head) {
+		t.Fatalf("Raw = %q, want head %q", unpacked.GetRawData(), head)
+	}
 	if !bytes.Equal(wire[dp.GetHeadLen():], []byte("hello kinz")) {
 		t.Fatalf("payload = %q, want %q", wire[dp.GetHeadLen():], "hello kinz")
+	}
+}
+
+func TestMessageSetters(t *testing.T) {
+	msg := NewMessage(1, nil)
+	msg.SetMsgID(7)
+	msg.SetData([]byte("xyz"))
+	msg.SetDataLen(2)
+
+	if msg.GetMsgID() != 7 {
+		t.Fatalf("MsgID = %d, want 7", msg.GetMsgID())
+	}
+	if msg.GetDataLen() != 2 {
+		t.Fatalf("DataLen = %d, want 2", msg.GetDataLen())
+	}
+	if !bytes.Equal(msg.GetData(), []byte("xyz")) {
+		t.Fatalf("Data = %q, want xyz", msg.GetData())
+	}
+	if msg.GetRawData() != nil {
+		t.Fatal("Raw should be nil for a fresh message")
 	}
 }
 
@@ -1004,7 +1300,7 @@ git commit -m "feat(knet): migrate TLV codec with unit tests and sentinel errors
 
 ---
 
-## Task 4: knet 桩实现 + 接口断言
+## Task 5: knet 桩实现 + 接口断言
 
 **Files（全部重写为满足接口的桩，P2 重写行为）：**
 - Rewrite: `knet/server.go`、`knet/connection.go`、`knet/msgHandler.go`、`knet/connmanager.go`、`knet/heartbeat.go`、`knet/client.go`
@@ -1582,7 +1878,7 @@ git commit -m "feat(knet): add phase-2 stub implementations and compile-time int
 
 ---
 
-## Task 5: 全量验证 + CLAUDE.md 同步
+## Task 6: 全量验证 + CLAUDE.md 同步
 
 **Files:**
 - Modify: `CLAUDE.md`（仅构建命令同步；完整重写在 P5）
@@ -1635,6 +1931,7 @@ git commit -m "docs: sync CLAUDE.md build commands after kinz rename"
 - [ ] `go test -race ./...` 全绿
 - [ ] `kiface` 无僵尸方法（无 `Inotify/IFuncRequest/HandleFunc/Goto`）
 - [ ] `knet` 无 `panic("implement me")`（桩返回 `ErrNotImplemented`）
+- [ ] `klog` 测试全绿（级别过滤/JSON/With/InfoF 兼容，6 个用例）
 - [ ] 所有接口有英文 doc comment
 - [ ] 接口断言测试（knet/kinterceptor）通过
 - [ ] 编解码层覆盖率 ≥ 80%，整体覆盖率报告已生成
