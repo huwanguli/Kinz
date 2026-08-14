@@ -1,108 +1,91 @@
 package klog
 
 import (
+	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
-	"path/filepath"
-	"runtime"
-	"strconv"
-	"sync"
-	"time"
 )
 
-var (
-	errorLog = log.New(os.Stdout, "", 0)
-	infoLog  = log.New(os.Stdout, "", 0)
-	loggers  = []*log.Logger{errorLog, infoLog}
-	mu       sync.Mutex
-)
+// Options configures a Logger.
+type Options struct {
+	// Level is the minimum severity to emit (default Info).
+	Level Level
+	// JSON selects the JSON handler instead of the text handler.
+	JSON bool
+	// AddSource includes the caller file:line in each record.
+	AddSource bool
+	// Output is the destination (default os.Stdout).
+	Output io.Writer
+}
 
-// log levels
-const (
-	InfoLevel = iota
-	ErrorLevel
-	Disabled
-)
+// Logger is the default ILogger implementation backed by log/slog.
+// Its level is dynamic: SetLevel takes effect immediately.
+type Logger struct {
+	l        *slog.Logger
+	levelVar *slog.LevelVar
+}
 
-// SetLevel 保持原有逻辑不变
-func SetLevel(level int) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	for _, logger := range loggers {
-		logger.SetOutput(os.Stdout)
+// New creates a Logger from opts.
+func New(opts Options) *Logger {
+	if opts.Output == nil {
+		opts.Output = os.Stdout
 	}
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.Level(opts.Level))
+	handlerOpts := &slog.HandlerOptions{Level: levelVar, AddSource: opts.AddSource}
 
-	if ErrorLevel < level {
-		errorLog.SetOutput(io.Discard)
+	var handler slog.Handler
+	if opts.JSON {
+		handler = slog.NewJSONHandler(opts.Output, handlerOpts)
+	} else {
+		handler = slog.NewTextHandler(opts.Output, handlerOpts)
 	}
-	if InfoLevel < level {
-		infoLog.SetOutput(io.Discard)
-	}
+	return &Logger{l: slog.New(handler), levelVar: levelVar}
 }
 
-// getCallerInfo 解析调用栈，返回「文件夹名/文件名:行号」格式的字符串
-func getCallerInfo() string {
-	// 栈帧跳过规则：
-	// 0: getCallerInfo 自身
-	// 1: InfoF/ErrorF 方法
-	// 2: 业务代码调用 InfoF/ErrorF 的位置（目标位置）
-	_, fullFile, line, ok := runtime.Caller(2)
-	if !ok {
-		return "unknown/unknown:0"
-	}
+// SetLevel adjusts the minimum severity dynamically.
+func (lg *Logger) SetLevel(level Level) { lg.levelVar.Set(slog.Level(level)) }
 
-	// 解析全路径：提取 父文件夹名 + 文件名
-	dir := filepath.Dir(fullFile)       // 获取文件所在的文件夹全路径
-	dirName := filepath.Base(dir)       // 提取文件夹名（最后一级）
-	fileName := filepath.Base(fullFile) // 提取文件名
+// Debug implements ILogger.
+func (lg *Logger) Debug(msg string, args ...any) { lg.l.Debug(msg, args...) }
 
-	// 拼接成「文件夹名/文件名:行号」
-	return dirName + "/" + fileName + ":" + strconv.Itoa(line)
+// Info implements ILogger.
+func (lg *Logger) Info(msg string, args ...any) { lg.l.Info(msg, args...) }
+
+// Warn implements ILogger.
+func (lg *Logger) Warn(msg string, args ...any) { lg.l.Warn(msg, args...) }
+
+// Error implements ILogger.
+func (lg *Logger) Error(msg string, args ...any) { lg.l.Error(msg, args...) }
+
+// InfoF implements ILogger.
+func (lg *Logger) InfoF(format string, args ...any) {
+	lg.l.Info(fmt.Sprintf(format, args...))
 }
 
-var logInstance ILogger = &LogDefault{
-	info:  infoLog,
-	error: errorLog,
+// ErrorF implements ILogger.
+func (lg *Logger) ErrorF(format string, args ...any) {
+	lg.l.Error(fmt.Sprintf(format, args...))
 }
 
-type LogDefault struct {
-	info  *log.Logger
-	error *log.Logger
+// With implements ILogger.
+func (lg *Logger) With(fields ...any) ILogger {
+	return &Logger{l: lg.l.With(fields...), levelVar: lg.levelVar}
 }
 
-func (l LogDefault) InfoF(format string, args ...interface{}) {
-	// 手动拼接日志前缀：颜色 + 级别 + 时间 + 文件夹/文件:行号
-	now := time.Now().Format("2006/01/02 15:04:05") // 对齐原 log.LstdFlags 时间格式
-	callerInfo := getCallerInfo()
-	prefix := "\033[34m[info ]\033[0m " + now + " " + callerInfo + ": "
-	l.info.Printf(prefix+format, args...)
-}
+var defaultLogger ILogger = New(Options{})
 
-func (l LogDefault) ErrorF(format string, args ...interface{}) {
-	now := time.Now().Format("2006/01/02 15:04:05")
-	callerInfo := getCallerInfo()
-	prefix := "\033[31m[error]\033[0m " + now + " " + callerInfo + ": "
-	l.error.Printf(prefix+format, args...)
-}
+// L returns the package-level default logger.
+func L() ILogger { return defaultLogger }
 
-func L() ILogger {
-	return logInstance
-}
+// SetDefault replaces the package-level default logger.
+func SetDefault(l ILogger) { defaultLogger = l }
 
-// 兼容旧日志：同步修改 Infof/Errorf 保证行号和文件夹名正确
-var (
-	Infof = func(format string, args ...interface{}) {
-		now := time.Now().Format("2006/01/02 15:04:05")
-		callerInfo := getCallerInfo()
-		prefix := "\033[34m[info ]\033[0m " + now + " " + callerInfo + ": "
-		infoLog.Printf(prefix+format, args...)
-	}
-	Errorf = func(format string, args ...interface{}) {
-		now := time.Now().Format("2006/01/02 15:04:05")
-		callerInfo := getCallerInfo()
-		prefix := "\033[31m[error]\033[0m " + now + " " + callerInfo + ": "
-		errorLog.Printf(prefix+format, args...)
-	}
-)
+// Package-level convenience delegates to L().
+func Debug(msg string, args ...any)     { L().Debug(msg, args...) }
+func Info(msg string, args ...any)      { L().Info(msg, args...) }
+func Warn(msg string, args ...any)      { L().Warn(msg, args...) }
+func Error(msg string, args ...any)     { L().Error(msg, args...) }
+func InfoF(format string, args ...any)  { L().InfoF(format, args...) }
+func ErrorF(format string, args ...any) { L().ErrorF(format, args...) }
