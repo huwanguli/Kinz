@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"kinz/kiface"
+	"math"
 )
 
 type FrameDecoder struct {
