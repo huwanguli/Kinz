@@ -56,6 +56,25 @@ func TestHistogramDefaultBuckets(t *testing.T) {
 	}
 }
 
+func TestGauge(t *testing.T) {
+	r := NewRegistry()
+	g := r.Gauge("kinz_test_active", "active connections")
+	g.Inc()
+	g.Inc()
+	g.Dec()
+	if g.Value() != 1 {
+		t.Fatalf("Value = %d, want 1", g.Value())
+	}
+	g.Set(7)
+	if g.Value() != 7 {
+		t.Fatalf("Value = %d, want 7", g.Value())
+	}
+	snap := r.Snapshot()
+	if snap.Gauges["kinz_test_active"] != 7 {
+		t.Fatalf("gauge snapshot = %v", snap.Gauges)
+	}
+}
+
 func TestSnapshotContainsAll(t *testing.T) {
 	r := NewRegistry()
 	r.Counter("kinz_a_total", "a").Inc()

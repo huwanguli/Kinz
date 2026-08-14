@@ -28,12 +28,13 @@ const (
 // buffered write queue with timeout, liveness tracking, and key-value
 // properties. Stop is idempotent and safe from any goroutine.
 type Connection struct {
-	server connHost
-	conn   net.Conn
-	connID uint64
-	codec  kiface.ICodec
-	msgHdl kiface.IMsgHandle
-	cfg    *kconf.Config
+	server  connHost
+	conn    net.Conn
+	connID  uint64
+	codec   kiface.ICodec
+	msgHdl  kiface.IMsgHandle
+	cfg     *kconf.Config
+	metrics *connMetrics
 
 	msgChan      chan []byte
 	done         chan struct{}
@@ -52,7 +53,8 @@ type Connection struct {
 // clone) and the message handler. The caller registers it in the host's
 // ConnManager before calling Start.
 func NewConnection(host connHost, conn net.Conn, connID uint64,
-	codec kiface.ICodec, msgHdl kiface.IMsgHandle, cfg *kconf.Config) *Connection {
+	codec kiface.ICodec, msgHdl kiface.IMsgHandle, cfg *kconf.Config,
+	metrics *connMetrics) *Connection {
 	c := &Connection{
 		server:   host,
 		conn:     conn,
@@ -60,6 +62,7 @@ func NewConnection(host connHost, conn net.Conn, connID uint64,
 		codec:    codec,
 		msgHdl:   msgHdl,
 		cfg:      cfg,
+		metrics:  metrics,
 		msgChan:  make(chan []byte, cfg.WriteQueueSize),
 		done:     make(chan struct{}),
 		property: make(map[string]interface{}),
@@ -99,12 +102,18 @@ func (c *Connection) startReader() {
 			return
 		}
 		c.touch()
+		if c.metrics != nil {
+			c.metrics.bytesIn.Add(uint64(n))
+		}
 		msgs, derr := c.codec.Decode(buf[:n])
 		if derr != nil {
 			klog.L().Warn("decode error, closing connection", "connID", c.connID, "err", derr)
 			return
 		}
 		for _, msg := range msgs {
+			if c.metrics != nil {
+				c.metrics.msgsRecv.Inc()
+			}
 			c.msgHdl.SendMsgToTaskQueue(NewRequest(c, msg))
 		}
 	}
@@ -121,6 +130,9 @@ func (c *Connection) startWriter() {
 				c.stopOnce()
 				return
 			}
+			if c.metrics != nil {
+				c.metrics.bytesOut.Add(uint64(len(data)))
+			}
 		case <-c.done:
 			return
 		}
@@ -135,6 +147,10 @@ func (c *Connection) stopOnce() {
 		c.server.CallOnConnStop(c)
 		if c.hb != nil {
 			c.hb.Stop()
+		}
+		if c.metrics != nil {
+			c.metrics.active.Dec()
+			c.metrics.closed.Inc()
 		}
 		_ = c.conn.Close()
 		close(c.done)
@@ -175,6 +191,9 @@ func (c *Connection) SendMsg(msgID uint32, data []byte) error {
 	if timeout > 0 {
 		select {
 		case c.msgChan <- wire:
+			if c.metrics != nil {
+				c.metrics.msgsSent.Inc()
+			}
 			return nil
 		case <-c.done:
 			return kiface.ErrConnClosed
@@ -184,6 +203,9 @@ func (c *Connection) SendMsg(msgID uint32, data []byte) error {
 	}
 	select {
 	case c.msgChan <- wire:
+		if c.metrics != nil {
+			c.metrics.msgsSent.Inc()
+		}
 		return nil
 	case <-c.done:
 		return kiface.ErrConnClosed

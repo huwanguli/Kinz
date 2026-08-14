@@ -33,6 +33,25 @@ func (c *Counter) Add(v uint64) { c.value.Add(v) }
 // Value returns the current value.
 func (c *Counter) Value() uint64 { return c.value.Load() }
 
+// Gauge is a value that can go up and down (Prometheus gauge semantics).
+type Gauge struct {
+	name  string
+	help  string
+	value atomic.Int64
+}
+
+// Inc increments the gauge by one.
+func (g *Gauge) Inc() { g.value.Add(1) }
+
+// Dec decrements the gauge by one.
+func (g *Gauge) Dec() { g.value.Add(-1) }
+
+// Set sets the gauge to v.
+func (g *Gauge) Set(v int64) { g.value.Store(v) }
+
+// Value returns the current value.
+func (g *Gauge) Value() int64 { return g.value.Load() }
+
 // Histogram observes values into fixed upper-bound buckets (Prometheus
 // histogram semantics: buckets are cumulative "le" counts).
 type Histogram struct {
@@ -77,6 +96,7 @@ func (h *Histogram) Count() uint64 {
 type Registry struct {
 	mu         sync.RWMutex
 	counters   map[string]*Counter
+	gauges     map[string]*Gauge
 	histograms map[string]*Histogram
 }
 
@@ -84,6 +104,7 @@ type Registry struct {
 func NewRegistry() *Registry {
 	return &Registry{
 		counters:   make(map[string]*Counter),
+		gauges:     make(map[string]*Gauge),
 		histograms: make(map[string]*Histogram),
 	}
 }
@@ -105,6 +126,24 @@ func (r *Registry) Counter(name, help string) *Counter {
 	c = &Counter{name: name, help: help}
 	r.counters[name] = c
 	return c
+}
+
+// Gauge returns the gauge registered under name, creating it on first use.
+func (r *Registry) Gauge(name, help string) *Gauge {
+	r.mu.RLock()
+	g, ok := r.gauges[name]
+	r.mu.RUnlock()
+	if ok {
+		return g
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if g, ok := r.gauges[name]; ok {
+		return g
+	}
+	g = &Gauge{name: name, help: help}
+	r.gauges[name] = g
+	return g
 }
 
 // Histogram returns the histogram registered under name, creating it on first
@@ -132,6 +171,7 @@ func (r *Registry) Histogram(name, help string, buckets []float64) *Histogram {
 // Snapshot is a framework-neutral copy of all metrics (for MCP and exporters).
 type Snapshot struct {
 	Counters   map[string]uint64
+	Gauges     map[string]int64
 	Histograms map[string]HistogramSnapshot
 }
 
@@ -150,10 +190,14 @@ func (r *Registry) Snapshot() Snapshot {
 
 	snap := Snapshot{
 		Counters:   make(map[string]uint64, len(r.counters)),
+		Gauges:     make(map[string]int64, len(r.gauges)),
 		Histograms: make(map[string]HistogramSnapshot, len(r.histograms)),
 	}
 	for name, c := range r.counters {
 		snap.Counters[name] = c.Value()
+	}
+	for name, g := range r.gauges {
+		snap.Gauges[name] = g.Value()
 	}
 	for name, h := range r.histograms {
 		h.mu.Lock()
@@ -185,6 +229,11 @@ func (r *Registry) WritePrometheusText(w writer) error {
 	defer r.mu.RUnlock()
 	for name, c := range r.counters {
 		if err := writeCounter(w, name, c.help, c.Value()); err != nil {
+			return err
+		}
+	}
+	for name, g := range r.gauges {
+		if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %d\n", name, g.help, name, name, g.Value()); err != nil {
 			return err
 		}
 	}

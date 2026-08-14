@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"kinz/kconf"
 	"kinz/kiface"
 	"kinz/klog"
+	"kinz/kmetrics"
 )
 
 // Option customizes a Server at construction time.
@@ -50,6 +52,14 @@ type Server struct {
 	hbTemplate kiface.IHeartbeatChecker
 	tlsConfig  *tls.Config
 
+	metrics       *kmetrics.Registry
+	connsTotal    *kmetrics.Counter
+	connsActive   *kmetrics.Gauge
+	connsClosed   *kmetrics.Counter
+	connsRejected *kmetrics.Counter
+
+	metricsListener net.Listener
+
 	onConnStart func(kiface.IConnection)
 	onConnStop  func(kiface.IConnection)
 
@@ -69,7 +79,47 @@ func NewServer(opts ...Option) kiface.IServer {
 	s.connMgr = NewConnManager(s.cfg.MaxConn)
 	s.msgHandler = NewMsgHandler(s.cfg.WorkerPoolSize, s.cfg.MaxWorkerTaskLen)
 	s.codec = NewTLVPackWithOrder(binary.LittleEndian, s.cfg.MaxPacketSize)
+
+	s.metrics = kmetrics.NewRegistry()
+	s.connsTotal = s.metrics.Counter(mConnTotal, "Total connections accepted")
+	s.connsActive = s.metrics.Gauge(mConnActive, "Currently active connections")
+	s.connsClosed = s.metrics.Counter(mConnClosed, "Connections closed")
+	s.connsRejected = s.metrics.Counter(mConnRejected, "Connections rejected (max reached)")
+	if mh, ok := s.msgHandler.(*MsgHandler); ok {
+		mh.SetMetrics(newHandlerMetrics(s.metrics))
+	}
 	return s
+}
+
+// GetMetrics implements kiface.IServer.
+func (s *Server) GetMetrics() *kmetrics.Registry { return s.metrics }
+
+// AttachMetrics implements kiface.IServer: serves the built-in Prometheus
+// text endpoint (/metrics) on addr. For the official client, use
+// kmetrics/prometheus.NewHandler(s.GetMetrics()) with your own HTTP mux.
+func (s *Server) AttachMetrics(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		if err := s.metrics.WritePrometheusText(w); err != nil {
+			klog.L().Warn("write metrics failed", "err", err)
+		}
+	})
+	srv := &http.Server{Handler: mux}
+	s.mu.Lock()
+	if s.metricsListener != nil {
+		s.mu.Unlock()
+		_ = ln.Close()
+		return errors.New("kinz: metrics endpoint already attached")
+	}
+	s.metricsListener = ln
+	s.mu.Unlock()
+	go func() { _ = srv.Serve(ln) }()
+	return nil
 }
 
 // Run implements kiface.IServer: starts the listener and worker pool, blocks
@@ -126,10 +176,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.closed = true
 	ln := s.listener
+	metricsLn := s.metricsListener
+	s.metricsListener = nil
 	s.mu.Unlock()
 
 	if ln != nil {
 		_ = ln.Close()
+	}
+	if metricsLn != nil {
+		_ = metricsLn.Close()
 	}
 
 	drained := make(chan struct{})
@@ -185,10 +240,13 @@ func (s *Server) acceptLoop(ln net.Listener) {
 }
 
 func (s *Server) handleConn(conn net.Conn) error {
-	c := NewConnection(s, conn, s.connID.Add(1), s.codec.Clone(), s.msgHandler, s.cfg)
+	c := NewConnection(s, conn, s.connID.Add(1), s.codec.Clone(), s.msgHandler, s.cfg,
+		newConnMetrics(s.metrics))
 	if err := s.connMgr.Add(c); err != nil {
 		return err // ErrServerFull
 	}
+	s.connsTotal.Inc()
+	s.connsActive.Inc()
 	go c.Start()
 	return nil
 }
@@ -196,6 +254,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 // rejectConn sends a server-full message with the cause, then closes the
 // connection (write deadline protects against a stuck peer).
 func (s *Server) rejectConn(conn net.Conn, cause error) error {
+	s.connsRejected.Inc()
 	klog.L().Warn("connection rejected", "remote", conn.RemoteAddr().String(), "cause", cause)
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Duration(s.cfg.WriteTimeout)))
 	wire, err := s.codec.Pack(NewMessage(kiface.ServerFullMsgID, []byte(cause.Error())))
@@ -268,6 +327,7 @@ func (s *Server) StartHeartBeat(interval time.Duration) {
 // template; each new connection clones and starts it.
 func (s *Server) SetHeartBeatWithOption(interval time.Duration, option *kiface.HeartBeatOption) {
 	tpl := NewHeartbeatChecker(interval)
+	tpl.SetMetrics(newHeartbeatMetrics(s.metrics))
 	if option != nil {
 		if option.MakeMsg != nil {
 			tpl.SetHeartBeatMsgFunc(option.MakeMsg)

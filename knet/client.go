@@ -14,6 +14,7 @@ import (
 
 	"kinz/kconf"
 	"kinz/kiface"
+	"kinz/kmetrics"
 )
 
 // reconnectPolicy configures automatic reconnection: exponential backoff with
@@ -68,6 +69,8 @@ type Client struct {
 	onConnStart func(kiface.IConnection)
 	onConnStop  func(kiface.IConnection)
 
+	metrics *kmetrics.Registry
+
 	mu       sync.Mutex
 	started  bool
 	stopping bool
@@ -96,6 +99,10 @@ func NewClient(ip string, port int, opts ...ClientOption) kiface.IClient {
 	}
 	if c.codec == nil {
 		c.codec = NewTLVPackWithOrder(binary.LittleEndian, c.cfg.MaxPacketSize)
+	}
+	c.metrics = kmetrics.NewRegistry()
+	if mh, ok := c.msgHandler.(*MsgHandler); ok {
+		mh.SetMetrics(newHandlerMetrics(c.metrics))
 	}
 	return c
 }
@@ -140,6 +147,8 @@ func (c *Client) Start() error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
+	c.msgHandler.StartWorkerPool()
+
 	if _, err := c.dial(ctx); err != nil {
 		c.mu.Lock()
 		c.started = false
@@ -170,6 +179,9 @@ func (c *Client) Stop() {
 		conn.Stop()
 	}
 	c.connMgr.ClearConn()
+	ctx, sc := context.WithTimeout(context.Background(), time.Second)
+	c.msgHandler.StopWorkerPool(ctx)
+	sc()
 }
 
 // Restart implements kiface.IClient: Stop then Start (best-effort on the
@@ -194,7 +206,8 @@ func (c *Client) dial(ctx context.Context) (*Connection, error) {
 		return nil, err
 	}
 
-	conn := NewConnection(c, raw, c.connID.Add(1), c.codec.Clone(), c.msgHandler, c.cfg)
+	conn := NewConnection(c, raw, c.connID.Add(1), c.codec.Clone(), c.msgHandler, c.cfg,
+		newConnMetrics(c.metrics))
 
 	c.mu.Lock()
 	if c.stopping {

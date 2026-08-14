@@ -26,9 +26,14 @@ type HeartBeatChecker struct {
 	msgID        uint32
 	routerSlices []kiface.RouterHandler
 
+	metrics *heartbeatMetrics
+
 	connMu sync.RWMutex
 	conn   kiface.IConnection
 }
+
+// SetMetrics wires liveness metrics (heartbeat_missed).
+func (h *HeartBeatChecker) SetMetrics(m *heartbeatMetrics) { h.metrics = m }
 
 // NewHeartbeatChecker creates a checker with default behavior: heartbeat
 // message with HeartBeatDefaultMsgID, default payload, graceful conn.Stop on
@@ -136,6 +141,9 @@ func (h *HeartBeatChecker) check() {
 		return
 	}
 	if !conn.IsAlive(h.timeout) {
+		if h.metrics != nil {
+			h.metrics.missed.Inc()
+		}
 		h.onRemoteNotAlive(conn)
 		return
 	}

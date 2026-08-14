@@ -1,8 +1,8 @@
-// Command client is a raw TLV client for the Kinz echo demo server.
+// Command client is the Kinz echo demo client, built on the framework's own
+// knet.Client (dial, auto-reconnect, routing, heartbeat).
 //
 // It connects, sends three pings (msgID 1) in a burst, expects three pongs
-// (msgID 2) with matching payloads, and exits. It also skips heartbeat frames
-// (msgID 99999) that the server sends periodically.
+// (msgID 2) with matching payloads, then exits.
 //
 // Run:  go run ./examples/echo/client [addr]   (default 127.0.0.1:8999)
 package main
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"kinz/kiface"
@@ -18,90 +19,64 @@ import (
 )
 
 func main() {
-	addr := "127.0.0.1:8999"
+	host, port := "127.0.0.1", 8999
 	if len(os.Args) > 1 {
-		addr = os.Args[1]
-	}
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		fatal("dial", err)
-	}
-	defer conn.Close()
-	fmt.Printf("connected to %s\n", addr)
-
-	codec := knet.NewTLVPack()
-
-	// Send three pings in a burst (TCP may deliver them as one segment).
-	for i := 1; i <= 3; i++ {
-		wire, err := codec.Pack(knet.NewMessage(1, []byte(fmt.Sprintf("ping-%d", i))))
+		h, p, err := net.SplitHostPort(os.Args[1])
 		if err != nil {
-			fatal("pack", err)
+			fmt.Fprintln(os.Stderr, "bad address:", err)
+			os.Exit(1)
 		}
-		if _, err := conn.Write(wire); err != nil {
-			fatal("write", err)
+		port, err = strconv.Atoi(p)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bad port:", err)
+			os.Exit(1)
+		}
+		host = h
+	}
+
+	client := knet.NewClient(host, port,
+		knet.WithReconnect(500*time.Millisecond, 3*time.Second, 2))
+
+	responses := make(chan string, 3)
+	if _, err := client.AddRouterSlices(2, func(req kiface.IRequest) {
+		responses <- string(req.GetData())
+	}); err != nil {
+		fatal("register router", err)
+	}
+
+	if err := client.Start(); err != nil {
+		fatal("connect", err)
+	}
+	defer client.Stop()
+	fmt.Printf("connected to %s:%d\n", host, port)
+
+	for i := 1; i <= 3; i++ {
+		if err := client.Conn().SendMsg(1, []byte(fmt.Sprintf("ping-%d", i))); err != nil {
+			fatal("send", err)
 		}
 	}
-	fmt.Println("sent 3 pings")
 
-	// Expect three pongs with matching payloads.
 	for i := 1; i <= 3; i++ {
-		msg, err := readMsg(conn, codec, 5*time.Second)
-		if err != nil {
-			fatal("read pong", err)
-		}
 		want := fmt.Sprintf("ping-%d", i)
-		if msg.GetMsgID() != 2 || string(msg.GetData()) != want {
-			fatalf("unexpected response: msgID=%d data=%q, want msgID=2 data=%q",
-				msg.GetMsgID(), msg.GetData(), want)
+		select {
+		case data := <-responses:
+			if data != want {
+				fatalf("unexpected pong %q, want %q", data, want)
+			}
+			fmt.Printf("pong %d/%d: %q\n", i, 3, data)
+		case <-time.After(5 * time.Second):
+			fatal("timeout waiting for pong", nil)
 		}
-		fmt.Printf("pong %d/%d: %q\n", i, 3, string(msg.GetData()))
 	}
 	fmt.Println("echo OK")
 }
 
-// readMsg returns the next non-heartbeat message. It first drains messages
-// already buffered inside the codec (TCP may deliver several in one segment),
-// then reads from the socket only when the buffer is exhausted.
-func readMsg(conn net.Conn, codec *knet.TLVPack, timeout time.Duration) (kiface.IMessage, error) {
-	chunk := make([]byte, 4096)
-	for {
-		// Drain the codec's internal buffer first: Decode(nil) consumes no
-		// socket data and returns any complete frames already received.
-		msgs, derr := codec.Decode(nil)
-		if derr != nil {
-			return nil, derr
-		}
-		if m := firstNonHeartbeat(msgs); m != nil {
-			return m, nil
-		}
-		// Buffer exhausted: read more from the socket.
-		_ = conn.SetReadDeadline(time.Now().Add(timeout))
-		n, err := conn.Read(chunk)
-		if err != nil {
-			return nil, err
-		}
-		msgs, derr = codec.Decode(chunk[:n])
-		if derr != nil {
-			return nil, derr
-		}
-		if m := firstNonHeartbeat(msgs); m != nil {
-			return m, nil
-		}
-	}
-}
-
-func firstNonHeartbeat(msgs []kiface.IMessage) kiface.IMessage {
-	for _, m := range msgs {
-		if m.GetMsgID() != kiface.HeartBeatDefaultMsgID {
-			return m
-		}
-	}
-	return nil
-}
-
 func fatal(what string, err error) {
-	fmt.Fprintln(os.Stderr, what+":", err)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, what+":", err)
+	} else {
+		fmt.Fprintln(os.Stderr, what)
+	}
 	os.Exit(1)
 }
 

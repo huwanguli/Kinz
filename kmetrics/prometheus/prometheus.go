@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"net/http"
 
+	"kinz/kmetrics"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"kinz/kmetrics"
 )
 
 // snapshotCollector mirrors the kmetrics registry into a prometheus.Collector
@@ -31,6 +32,11 @@ func (c *snapshotCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(
 			prometheus.NewDesc(name, "", nil, nil),
 			prometheus.CounterValue, float64(value))
+	}
+	for name, value := range snap.Gauges {
+		ch <- prometheus.MustNewConstMetric(
+			prometheus.NewDesc(name, "", nil, nil),
+			prometheus.GaugeValue, float64(value))
 	}
 	for name, h := range snap.Histograms {
 		buckets := make(map[float64]uint64, len(h.Buckets))

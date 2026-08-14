@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"kinz/kiface"
 	"kinz/klog"
@@ -31,7 +32,12 @@ type MsgHandler struct {
 	workerCtx        context.Context
 	workerCancel     context.CancelFunc
 	workerWG         sync.WaitGroup
+
+	metrics *handlerMetrics
 }
+
+// SetMetrics wires dispatch metrics (panics, duration, queue-full).
+func (mh *MsgHandler) SetMetrics(m *handlerMetrics) { mh.metrics = m }
 
 // NewMsgHandler creates a MsgHandler. workerPoolSize == 0 disables the pool
 // (one goroutine per message).
@@ -159,19 +165,37 @@ func (mh *MsgHandler) SendMsgToTaskQueue(request kiface.IRequest) {
 		return
 	}
 	workerID := request.GetConnection().GetConnID() % uint64(poolSize)
-	taskQueue[workerID] <- request
+	queue := taskQueue[workerID]
+	if mh.metrics != nil {
+		// Detect a full queue for the metric, then fall through to the
+		// blocking send (backpressure keeps per-connection order).
+		select {
+		case queue <- request:
+			return
+		default:
+			mh.metrics.queueFull.Inc()
+		}
+	}
+	queue <- request
 }
 
 // Execute implements kiface.IMsgHandle: builds the handler chain for the
 // request's msgID (global middleware + range middleware + route handlers) and
 // runs it. A panic in any handler is recovered here.
 func (mh *MsgHandler) Execute(request kiface.IRequest) {
+	start := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
+			if mh.metrics != nil {
+				mh.metrics.panics.Inc()
+			}
 			klog.L().Error("panic recovered in handler",
 				"msgID", request.GetMsgID(),
 				"panic", r,
 				"stack", string(debug.Stack()))
+		}
+		if mh.metrics != nil {
+			mh.metrics.duration.Observe(time.Since(start).Seconds())
 		}
 	}()
 

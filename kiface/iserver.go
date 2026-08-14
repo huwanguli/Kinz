@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"time"
+
+	"kinz/kmetrics"
 )
 
 // IServer is the top-level server contract. Convention-first: a Server created
@@ -58,4 +60,9 @@ type IServer interface {
 	SetHeartBeatWithOption(interval time.Duration, option *HeartBeatOption)
 	// GetHeartBeat returns the heartbeat checker template.
 	GetHeartBeat() IHeartbeatChecker
+
+	// GetMetrics returns the server's metrics registry (always non-nil).
+	GetMetrics() *kmetrics.Registry
+	// AttachMetrics serves a Prometheus text /metrics endpoint on addr.
+	AttachMetrics(addr string) error
 }

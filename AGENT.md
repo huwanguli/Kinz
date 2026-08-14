@@ -6,7 +6,7 @@ This file provides guidance to AI coding agents (Claude Code, Copilot, Gemini CL
 
 Kinz is a lightweight TCP server framework written in Go (Go 1.25), being refactored from the legacy Zinx codebase into a production-ready framework. The refactor runs in phases P0–P6 (see `docs/superpowers/specs/2026-08-14-zinx-production-refactor-design.md`); the repository is currently at the **end of P2** (core implementation rewrite).
 
-Module name: `kinz`. Packages: `kiface` (contract layer), `knet` (implementations), `klog` (slog-based logger), `kconf` (YAML config), `kpool` (sync.Pool buffers). Planned in later phases: `kmetrics`, `kmcp` (MCP server), `configs/`, `cmd/`.
+Module name: `kinz`. Packages: `kiface` (contract layer), `knet` (implementations), `klog` (slog-based logger), `kconf` (YAML config), `kpool` (sync.Pool buffers), `kmetrics` (zero-dep measurement layer + opt-in official-client bridge). Planned in later phases: `kmcp` (MCP server), `configs/`, `cmd/`.
 
 ## Build & Test Commands
 
@@ -36,21 +36,23 @@ go test -race ./...
 
 > Note: `go test -race` requires CGO + a C toolchain (gcc/ld). It does **not** run on this dev machine (no compiler installed); use CI (ubuntu) or install mingw. All other commands run locally.
 
-## Current State (end of P2)
+## Current State (end of P3)
 
-- **Server** (`knet/server.go`): `Run(ctx)` / `Shutdown(ctx)` / `Serve(ctx)` lifecycle with graceful shutdown (stop accepting → drain connections → stop worker pool), `Address()` for ephemeral ports, max-conn rejection (sends `kiface.ServerFullMsgID` then closes), heartbeat template wiring, option-based construction (`WithConfig`/`WithMaxConn`/`WithName`).
-- **Connection** (`knet/connection.go`): reader/writer goroutines, buffered write queue with timeout, atomic liveness tracking (`IsAlive`/`touch`), idempotent `Stop` via `sync.Once`, pooled read buffer (`kpool`), per-connection decoder clone.
-- **Routing** (`knet/msgHandler.go` + `routerSlices.go`): single function-style routing (`AddRouterSlices` + `Use`/`Group` middleware) with `Abort`, panic recovery per message, worker pool with graceful drain (`StopWorkerPool`), blocking backpressure. The classic `IRouter` (PreHandle/Handle/PostHandle) and the interceptor chain were both removed as redundant — middleware covers all pipeline needs (including message replacement via `req.SetMessage`).
-- **Heartbeat** (`knet/heartbeat.go`): interval + timeout (default 3×interval), any received message refreshes liveness, `OnRemoteNotAlive` defaults to graceful close, clone-per-connection.
-- **Codec** (`knet/datapack.go`): `knet.TLVPack` implements the single `kiface.ICodec` seam (framing + TLV parse + Pack in one unit, `Clone` per connection). Handles sticky/half packets internally, configurable byte order, returns `ErrTooLargePacket` on oversize; decoded payloads are copied so asynchronous processing is safe. Custom wire formats implement one `ICodec` (no separate frame decoder / packet pair).
-- **Config** (`kconf`): defaults → `conf/kinz.yaml` (missing file is fine) → `KINZ_*` env vars; durations accept "10s" strings or nanosecond ints.
+- **Server** (`knet/server.go`): `Run(ctx)` / `Shutdown(ctx)` / `Serve(ctx)` lifecycle with graceful shutdown, `Address()`, max-conn rejection, heartbeat template wiring, option-based construction (`WithConfig`/`WithMaxConn`/`WithName`/`WithTLS`), Prometheus `/metrics` endpoint via `AttachMetrics(addr)`, `GetMetrics()`.
+- **Connection** (`knet/connection.go`): reader/writer goroutines, buffered write queue with timeout, atomic liveness, idempotent `Stop` via `sync.Once`, pooled read buffer, per-connection codec clone, metrics counters. `GetConn()` returns `net.Conn` (plain TCP or TLS).
+- **Client** (`knet/client.go`): full implementation — dial (TCP or TLS), auto-reconnect with exponential backoff + jitter (`WithReconnect`), heartbeat, routing, worker pool. Shares the connection lifecycle with Server via the internal `connHost` abstraction. `Client.Start()` starts the worker pool (missed before, causing out-of-order dispatch under burst sends).
+- **Routing** (`knet/msgHandler.go` + `routerSlices.go`): single function-style routing (`AddRouterSlices` + `Use`/`Group` middleware) with onion-model before/after semantics, `Abort`, panic recovery, worker pool with graceful drain, blocking backpressure + `queue_full` metric.
+- **Heartbeat** (`knet/heartbeat.go`): interval + timeout, any-message liveness, `OnRemoteNotAlive` defaults to graceful close, clone-per-connection, `heartbeat_missed` metric.
+- **Metrics** (`kmetrics`): zero-dependency measurement layer (counters/gauges/histograms), `Snapshot()` for MCP, built-in `WritePrometheusText`, opt-in `kmetrics/prometheus` subpackage using the official client. The hand-written text format is validated by the official parser in tests.
+- **TLS**: `WithTLS` (server) / `WithTLSClient` (client) with a self-signed-cert integration test.
+- **Config** (`kconf`): defaults → `conf/kinz.yaml` → full `KINZ_*` env coverage.
+- **klog**: slog-based logger + ring-buffer backend (`klog.NewRingBuffer`, `Lines(n)` for MCP get_logs).
 - **kpool**: 4K/16K/64K size classes backed by `sync.Pool`.
-- **Client** (`knet/client.go`) is still a stub (full implementation lands in P3).
 
 ## Code Conventions
 
 - **Interface-first**: define the contract in `kiface` before implementing in `knet`.
-- **Convention-first**: default paths are production-safe (heartbeat, max-conn rejection, panic recovery, graceful shutdown); extension happens at seams (`ICodec`, `RouterHandler` middleware via `Use`/`Group`, `ILogger`, `IMetrics`).
+- **Convention-first**: default paths are production-safe (heartbeat, max-conn rejection, panic recovery, graceful shutdown); extension happens at seams (`ICodec`, `RouterHandler` middleware via `Use`/`Group`, `ILogger`, `kmetrics.Registry`).
 - **Middleware contract**: a handler must call `req.RouterSlicesNext()` to continue the chain (gin-style); `req.Abort()` stops the remaining handlers. The chain is **synchronous nesting (onion model)**: code written AFTER `req.RouterSlicesNext()` runs once the downstream handlers finish — use it for after-middleware (timing, recovery, response observability). `Abort()` still unwinds the stack, so upstream after-logic runs.
 - **Errors**: use sentinel errors from `kiface`, wrap with `%w`. No panics in library code paths.
 - **Byte order**: a wire-protocol decision — always explicit `binary.ByteOrder`, configurable (see `DataPack`/`NewDataPackWithOrder`); never probe host endianness.
@@ -62,12 +64,13 @@ go test -race ./...
 
 ```
 kiface/        contracts (interfaces, sentinel errors)
-knet/          runtime (Server, Connection, MsgHandler, ConnManager,
-               HeartBeatChecker, Client, DataPack, Message, Request)
-klog/          ILogger + slog default implementation
+knet/          runtime (Server, Client, Connection, MsgHandler, ConnManager,
+               HeartBeatChecker, DataPack/TLVPack, Message, Request)
+klog/          ILogger + slog default implementation + ring buffer
 kconf/         Config (defaults / YAML / env)
 kpool/         size-classed sync.Pool buffers
-examples/      runnable demos (ping)
+kmetrics/      zero-dep measurement layer + kmetrics/prometheus (official client)
+examples/      runnable demos (echo server + client)
 docs/          design spec + implementation plans + interview guide
 .github/       CI reference workflow (not required to run locally)
 ```
