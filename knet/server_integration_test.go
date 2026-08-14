@@ -164,7 +164,6 @@ func TestServerHeartbeatTimeout(t *testing.T) {
 	cfg := testConfig(func(c *kconf.Config) {
 		c.WorkerPoolSize = 1
 		c.MaxConn = 16
-		c.HeartbeatInterval = kconf.Duration(20 * time.Millisecond)
 	})
 	srv, cancel := startTestServer(t, cfg)
 	defer cancel()

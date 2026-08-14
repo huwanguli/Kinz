@@ -52,8 +52,6 @@ type IServer interface {
 	// The default is a little-endian TLV codec.
 	SetCodec(codec ICodec)
 	GetCodec() ICodec
-	// AddInterceptor appends a middleware interceptor to the request pipeline.
-	AddInterceptor(interceptor IInterceptor)
 	// GetMsgHandler returns the message dispatch module.
 	GetMsgHandler() IMsgHandle
 

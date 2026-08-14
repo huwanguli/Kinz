@@ -55,9 +55,6 @@ func (c *Client) SetCodec(codec kiface.ICodec) {}
 // GetCodec implements kiface.IClient.
 func (c *Client) GetCodec() kiface.ICodec { return nil }
 
-// AddInterceptor implements kiface.IClient. Phase 3.
-func (c *Client) AddInterceptor(interceptor kiface.IInterceptor) {}
-
 // GetMsgHandler implements kiface.IClient. Phase 3.
 func (c *Client) GetMsgHandler() kiface.IMsgHandle { return nil }
 

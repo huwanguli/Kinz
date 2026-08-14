@@ -12,9 +12,8 @@ type Request struct {
 	index    int
 	aborted  bool
 
-	router   kiface.IRouter
-	response kiface.IcResp
-	ctx      map[string]any
+	router kiface.IRouter
+	ctx    map[string]any
 }
 
 // NewRequest creates a Request for conn/msg.
@@ -36,12 +35,6 @@ func (r *Request) GetMessage() kiface.IMessage { return r.msg }
 
 // SetMessage implements kiface.IRequest.
 func (r *Request) SetMessage(m kiface.IMessage) { r.msg = m }
-
-// GetResponse implements kiface.IRequest.
-func (r *Request) GetResponse() kiface.IcResp { return r.response }
-
-// SetResponse implements kiface.IRequest.
-func (r *Request) SetResponse(resp kiface.IcResp) { r.response = resp }
 
 // BindRouter implements kiface.IRequest.
 func (r *Request) BindRouter(router kiface.IRouter) { r.router = router }
@@ -88,7 +81,6 @@ func (r *Request) Copy() kiface.IRequest {
 		handlers: r.handlers,
 		index:    r.index,
 		router:   r.router,
-		response: r.response,
 	}
 }
 

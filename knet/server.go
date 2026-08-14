@@ -255,11 +255,6 @@ func (s *Server) SetCodec(codec kiface.ICodec) { s.codec = codec }
 // GetCodec implements kiface.IServer.
 func (s *Server) GetCodec() kiface.ICodec { return s.codec }
 
-// AddInterceptor implements kiface.IServer.
-func (s *Server) AddInterceptor(interceptor kiface.IInterceptor) {
-	s.msgHandler.AddInterceptor(interceptor)
-}
-
 // GetMsgHandler implements kiface.IServer.
 func (s *Server) GetMsgHandler() kiface.IMsgHandle { return s.msgHandler }
 

@@ -40,36 +40,32 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // Config holds all runtime configuration with production-safe defaults.
+// Heartbeat timing is configured via Server.StartHeartBeat /
+// SetHeartBeatWithOption (not here), so the two never drift apart.
 type Config struct {
-	Name              string   `yaml:"Name"`
-	Host              string   `yaml:"Host"`
-	Port              int      `yaml:"Port"`
-	MaxConn           int      `yaml:"MaxConn"`
-	MaxPacketSize     uint32   `yaml:"MaxPacketSize"`
-	WorkerPoolSize    uint32   `yaml:"WorkerPoolSize"`
-	MaxWorkerTaskLen  uint32   `yaml:"MaxWorkerTaskLen"`
-	HeartbeatInterval Duration `yaml:"HeartbeatInterval"`
-	HeartbeatTimeout  Duration `yaml:"HeartbeatTimeout"`
-	WriteQueueSize    int      `yaml:"WriteQueueSize"`
-	WriteTimeout      Duration `yaml:"WriteTimeout"`
-	ReadIdleTimeout   Duration `yaml:"ReadIdleTimeout"`
+	Name             string   `yaml:"Name"`
+	Host             string   `yaml:"Host"`
+	Port             int      `yaml:"Port"`
+	MaxConn          int      `yaml:"MaxConn"`
+	MaxPacketSize    uint32   `yaml:"MaxPacketSize"`
+	WorkerPoolSize   uint32   `yaml:"WorkerPoolSize"`
+	MaxWorkerTaskLen uint32   `yaml:"MaxWorkerTaskLen"`
+	WriteQueueSize   int      `yaml:"WriteQueueSize"`
+	WriteTimeout     Duration `yaml:"WriteTimeout"`
 }
 
 // Default returns the built-in defaults.
 func Default() *Config {
 	return &Config{
-		Name:              "KinzServer",
-		Host:              "0.0.0.0",
-		Port:              8999,
-		MaxConn:           1024,
-		MaxPacketSize:     4096,
-		WorkerPoolSize:    10,
-		MaxWorkerTaskLen:  1024,
-		HeartbeatInterval: Duration(10 * time.Second),
-		HeartbeatTimeout:  Duration(30 * time.Second),
-		WriteQueueSize:    256,
-		WriteTimeout:      Duration(5 * time.Second),
-		ReadIdleTimeout:   Duration(0),
+		Name:             "KinzServer",
+		Host:             "0.0.0.0",
+		Port:             8999,
+		MaxConn:          1024,
+		MaxPacketSize:    4096,
+		WorkerPoolSize:   10,
+		MaxWorkerTaskLen: 1024,
+		WriteQueueSize:   256,
+		WriteTimeout:     Duration(5 * time.Second),
 	}
 }
 
@@ -129,13 +125,6 @@ func applyEnv(cfg *Config) error {
 			return fmt.Errorf("kinz: invalid KINZ_WORKERPOOLSIZE %q", v)
 		}
 		cfg.WorkerPoolSize = uint32(n)
-	}
-	if v, ok := get("KINZ_HEARTBEATINTERVAL"); ok {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("kinz: invalid KINZ_HEARTBEATINTERVAL %q", v)
-		}
-		cfg.HeartbeatInterval = Duration(d)
 	}
 	return nil
 }

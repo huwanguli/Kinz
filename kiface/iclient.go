@@ -26,8 +26,6 @@ type IClient interface {
 	// SetCodec / GetCodec configure the wire codec (framing + serialization).
 	SetCodec(ICodec)
 	GetCodec() ICodec
-	// AddInterceptor appends a middleware interceptor.
-	AddInterceptor(IInterceptor)
 	// GetMsgHandler returns the message dispatch module.
 	GetMsgHandler() IMsgHandle
 

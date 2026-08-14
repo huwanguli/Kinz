@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"kinz/kiface"
-	"kinz/kinterceptor"
 	"kinz/klog"
 )
 
@@ -33,9 +32,6 @@ type MsgHandler struct {
 	workerCtx        context.Context
 	workerCancel     context.CancelFunc
 	workerWG         sync.WaitGroup
-
-	interceptors    []kiface.IInterceptor
-	headInterceptor kiface.IInterceptor
 }
 
 // NewMsgHandler creates a MsgHandler. workerPoolSize == 0 disables the pool
@@ -182,30 +178,10 @@ func (mh *MsgHandler) SendMsgToTaskQueue(request kiface.IRequest) {
 	taskQueue[workerID] <- request
 }
 
-// Execute implements kiface.IMsgHandle: runs the interceptor chain, then
-// dispatches to the handler chain. A panic in any handler is recovered here.
+// Execute implements kiface.IMsgHandle: builds the handler chain for the
+// request's msgID (global middleware + range middleware + route handlers) and
+// runs it. A panic in any handler is recovered here.
 func (mh *MsgHandler) Execute(request kiface.IRequest) {
-	req := request
-	if mh.headInterceptor != nil {
-		chain := kinterceptor.NewChain(mh.interceptors, 0, req)
-		if resp := mh.headInterceptor.Intercept(chain); resp != nil {
-			if r, ok := resp.(kiface.IRequest); ok {
-				req = r
-			}
-		}
-	} else if len(mh.interceptors) > 0 {
-		chain := kinterceptor.NewChain(mh.interceptors, 0, req)
-		if resp := chain.Proceed(req); resp != nil {
-			if r, ok := resp.(kiface.IRequest); ok {
-				req = r
-			}
-		}
-	}
-	mh.dispatch(req)
-}
-
-// dispatch builds the handler chain for the request's msgID and runs it.
-func (mh *MsgHandler) dispatch(request kiface.IRequest) {
 	defer func() {
 		if r := recover(); r != nil {
 			klog.L().Error("panic recovered in handler",
@@ -240,24 +216,4 @@ func (mh *MsgHandler) dispatch(request kiface.IRequest) {
 	}
 	request.BindRouterSlices(all)
 	request.RouterSlicesNext()
-}
-
-// AddInterceptor implements kiface.IMsgHandle.
-func (mh *MsgHandler) AddInterceptor(interceptor kiface.IInterceptor) {
-	if interceptor == nil {
-		return
-	}
-	mh.mu.Lock()
-	mh.interceptors = append(mh.interceptors, interceptor)
-	mh.mu.Unlock()
-}
-
-// SetHeadInterceptor implements kiface.IMsgHandle.
-func (mh *MsgHandler) SetHeadInterceptor(interceptor kiface.IInterceptor) {
-	if interceptor == nil {
-		return
-	}
-	mh.mu.Lock()
-	mh.headInterceptor = interceptor
-	mh.mu.Unlock()
 }

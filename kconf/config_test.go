@@ -15,8 +15,8 @@ func TestDefault(t *testing.T) {
 	if cfg.MaxConn != 1024 {
 		t.Fatalf("MaxConn = %d, want 1024", cfg.MaxConn)
 	}
-	if time.Duration(cfg.HeartbeatInterval) != 10*time.Second {
-		t.Fatalf("HeartbeatInterval = %v, want 10s", cfg.HeartbeatInterval)
+	if time.Duration(cfg.WriteTimeout) != 5*time.Second {
+		t.Fatalf("WriteTimeout = %v, want 5s", cfg.WriteTimeout)
 	}
 }
 
@@ -33,7 +33,7 @@ func TestLoadMissingFileIsNotError(t *testing.T) {
 func TestLoadYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kinz.yaml")
-	content := "Host: 127.0.0.1\nPort: 9001\nMaxConn: 64\nHeartbeatInterval: 5s\nWriteTimeout: 2500000000\n"
+	content := "Host: 127.0.0.1\nPort: 9001\nMaxConn: 64\nWriteTimeout: 2500000000\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -44,9 +44,6 @@ func TestLoadYAML(t *testing.T) {
 	}
 	if cfg.Host != "127.0.0.1" || cfg.Port != 9001 || cfg.MaxConn != 64 {
 		t.Fatalf("yaml not applied: %+v", cfg)
-	}
-	if time.Duration(cfg.HeartbeatInterval) != 5*time.Second {
-		t.Fatalf("HeartbeatInterval = %v, want 5s", cfg.HeartbeatInterval)
 	}
 	// numeric (nanosecond) duration form
 	if time.Duration(cfg.WriteTimeout) != 2500*time.Millisecond {
@@ -69,13 +66,41 @@ func TestLoadInvalidYAML(t *testing.T) {
 	}
 }
 
+func TestLoadInvalidDuration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kinz.yaml")
+	if err := os.WriteFile(path, []byte("WriteTimeout: not-a-duration\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for invalid duration string")
+	}
+}
+
+func TestLoadWrongDurationType(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kinz.yaml")
+	if err := os.WriteFile(path, []byte("WriteTimeout: [1, 2]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for non-duration YAML value")
+	}
+}
+
+func TestLoadUnreadableFile(t *testing.T) {
+	// A directory cannot be read as a file -> non-IsNotExist error.
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Fatal("expected error for unreadable path")
+	}
+}
+
 func TestLoadEnvOverride(t *testing.T) {
 	t.Setenv("KINZ_HOST", "10.0.0.1")
 	t.Setenv("KINZ_PORT", "7777")
 	t.Setenv("KINZ_MAXCONN", "32")
 	t.Setenv("KINZ_MAXPACKETSIZE", "8192")
 	t.Setenv("KINZ_WORKERPOOLSIZE", "4")
-	t.Setenv("KINZ_HEARTBEATINTERVAL", "2s")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -87,9 +112,6 @@ func TestLoadEnvOverride(t *testing.T) {
 	if cfg.MaxPacketSize != 8192 || cfg.WorkerPoolSize != 4 {
 		t.Fatalf("env not applied: %+v", cfg)
 	}
-	if time.Duration(cfg.HeartbeatInterval) != 2*time.Second {
-		t.Fatalf("HeartbeatInterval = %v, want 2s", cfg.HeartbeatInterval)
-	}
 }
 
 func TestLoadInvalidEnv(t *testing.T) {
@@ -98,7 +120,6 @@ func TestLoadInvalidEnv(t *testing.T) {
 		{"KINZ_MAXCONN", "x"},
 		{"KINZ_MAXPACKETSIZE", "x"},
 		{"KINZ_WORKERPOOLSIZE", "x"},
-		{"KINZ_HEARTBEATINTERVAL", "x"},
 	} {
 		t.Setenv(kv[0], kv[1])
 		if _, err := Load(""); err == nil {

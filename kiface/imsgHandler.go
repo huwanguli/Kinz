@@ -20,11 +20,7 @@ type IMsgHandle interface {
 	StopWorkerPool(ctx context.Context)
 	// SendMsgToTaskQueue routes a request to a worker by ConnID.
 	SendMsgToTaskQueue(request IRequest)
-	// Execute runs the interceptor chain, then dispatches to the handler.
+	// Execute dispatches a request to its handler chain (global/group
+	// middleware + route handlers), recovering panics.
 	Execute(request IRequest)
-
-	// AddInterceptor appends an interceptor to the chain.
-	AddInterceptor(interceptor IInterceptor)
-	// SetHeadInterceptor prepends an interceptor to the chain.
-	SetHeadInterceptor(interceptor IInterceptor)
 }

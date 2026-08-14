@@ -18,7 +18,7 @@
 2. MCP 指"框架内置 MCP Server"：把运行中的服务器状态（连接、指标、配置）暴露给 AI 工具，支持监控与操控。
 3. 本次交付为详细重构计划文档，用户确认后再分阶段实施。
 4. **设计哲学：约定为主 + 明确扩展点**（见 §2）。
-5. **全面改名**：module 为 `kinz`，包为 `kiface/knet/klog/kconf/kmcp/kmetrics/kinterceptor`；`utils` 包移除（职责并入 `kconf`）。
+5. **全面改名**：module 为 `kinz`，包为 `kiface/knet/klog/kconf/kmcp/kmetrics`；`utils` 包移除（职责并入 `kconf`）。`kinterceptor` 包在 P2 删除（拦截器链与中间件重叠，见 §2.4）。
 6. **读协程缓冲用 `sync.Pool` 池化**（见 §6.3）。
 7. **配置文件用 YAML**（`gopkg.in/yaml.v3`，`conf/kinz.yaml`），不再用 JSON。
 8. **mmo 与 demo 不重构，直接删除归档**（git 历史可回溯）；框架示例（examples/）在 P5 以新 API 新建。
@@ -44,7 +44,7 @@
 | 扩展点 | 接口 | 默认实现 |
 |--------|------|----------|
 | 编解码 | `ICodec`（Decode/Pack/Clone 一体） | `knet.TLVPack`（小端 TLV，内部处理粘包/半包） |
-| 中间件 | `IInterceptor`（责任链） | 空链（可插入鉴权/加解密/限流） |
+| 中间件 | `RouterHandler`（`Use` 全局 / `Group` 区间） | 空（可插入鉴权/加解密/限流） |
 | 路由 | `IRouter` / `IRouterSlices` | 经典三段式 + 函数式中间件链 |
 | 日志 | `ILogger` | slog 封装 |
 | 指标 | `IMetrics` | 原子计数/直方图注册表 |
@@ -105,7 +105,6 @@
 kinz/
 ├── kiface/        接口层（约定 + seam 的契约）
 ├── knet/          实现层（Server/Connection/MsgHandler/HeartBeat/ConnManager/Client）
-├── kinterceptor/  Chain（拦截器责任链）
 ├── klog/          ILogger 接口 + slog 实现（含环形缓冲日志后端）
 ├── kconf/         Config + 默认值/YAML/env/Option 加载链
 ├── kmetrics/      指标注册表（原子计数/直方图）
@@ -125,7 +124,7 @@ kinz/
 │  Server（生命周期 Run/Shutdown，Option 配置）                            │
 │  ├─ Listener（TCP / TLS，Accept → 满连接拒绝 → NewConnection）           │
 │  ├─ Connection（读协程 + 写协程，原子状态机，IsAlive，缓冲池化）            │
-│  │    ├─ ICodec（池化读缓冲，内部处理粘包/半包）→ IInterceptor链      │
+│  │    ├─ ICodec（池化读缓冲，内部处理粘包/半包）→ 中间件链              │
 │  │    └─ msgChan(缓冲+超时) → Writer → socket                           │
 │  ├─ MsgHandler（RouterSlices/经典路由，Worker 池，panic 恢复）            │
 │  ├─ HeartBeatChecker（Server 配置 → 每连接 Clone，超时回调）              │
@@ -137,7 +136,7 @@ kinz/
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-数据流（读）：`socket → 池化读缓冲 → ICodec.Decode（帧重组 + TLV 解析，payload 独立复制）→ IMessage → IInterceptor 链 → IRequest → MsgHandler（按 MsgID 分发）→ Worker 池或直启 goroutine → 业务 Router`。
+数据流（读）：`socket → 池化读缓冲 → ICodec.Decode（帧重组 + TLV 解析，payload 独立复制）→ IMessage → IRequest → MsgHandler（中间件链 + 按 MsgID 分发）→ Worker 池或直启 goroutine → 业务 Router`。
 数据流（写）：`业务 → conn.SendMsg（封包，写缓冲池化）→ msgChan → Writer goroutine → socket`。
 
 ## 6. 详细设计
@@ -171,7 +170,7 @@ kinz/
 - **读缓冲池化（sync.Pool）**：
   - 新增独立小包 **`kpool`**（导出 `BufferPool`，便于单测）：按 **4K/16K/64K** 三个尺寸分类的 `sync.Pool`；`Get(size)` 返回不小于请求尺寸的缓冲，`Put(buf)` 归还（校验尺寸档位，首尾字节写哨兵以便误用检测）。
   - 应用点：① 每连接读缓冲（连接创建时 Get、关闭时 Put）；② `TLVPack` 内部累积缓冲；③ 解码产物消息载荷（codec 负责独立复制，见 §6.4）；④ `Pack` 封包写缓冲。
-  - 归还时机：统一在连接关闭路径归还，保证池不泄漏；被拦截器/业务持久持有的缓冲**不池化**（文档注明，避免误用）。
+  - 归还时机：统一在连接关闭路径归还，保证池不泄漏；被中间件/业务持久持有的缓冲**不池化**（文档注明，避免误用）。
   - 收益：高并发下避免每连接 4K 起步的分配/GC 压力；基准测试验证（见 §6.15）。
 - **存活跟踪**：`lastActivity` 原子时间戳，任何收到消息（不只心跳）都刷新；`IsAlive(timeout)` 基于此判断。
 - **读写超时**：可选 `ReadIdleTimeout`（配合心跳做兜底）；`SetWriteDeadline` 防对端不读导致的写阻塞。
@@ -186,7 +185,7 @@ kinz/
   - `ICodec.Pack(msg) ([]byte, error)`：封包；`ICodec.Clone()`：每连接独立实例。
   - **payload 契约**：Decode 返回的消息必须持有独立于 codec 内部缓冲的 payload（异步分发后不会被后续 Decode 覆写）——默认 `TLVPack` 在返回前复制。
 - 默认编解码器：`knet.TLVPack`（`[DataLen:4][MsgID:4][Data]`，默认小端，`NewTLVPackWithOrder` 可配大端；`MaxPacketSize` 超限返回 `ErrTooLargePacket`，连接关闭，fail-fast 安全姿态）。
-- 拦截器链：`IInterceptor` 责任链在 `MsgHandler.Execute(request)` 中执行，位于路由分发之前；`SetHeadInterceptor` 允许插入链头。
+- **中间件（唯一管道机制）**：P2 设计修订——原 `IInterceptor` 责任链与 `Use`/`Group` 中间件功能重叠（均按消息执行、可终止、可替换消息），且中间件能力完全覆盖拦截器（`req.SetMessage` 支持解密替换），故**删除拦截器链**（`kinterceptor` 包、`IInterceptor/IChain/IcReq/IcResp`、`IRequest.GetResponse/SetResponse`、`AddInterceptor`）。统一为 gin 式中间件：`Use`（全局）与 `Group(start, end)`（区间）在 `MsgHandler.Execute` 中与路由 handler 同链执行，`RouterSlicesNext()` 续链、`Abort()` 终止、`SetMessage` 替换消息。
 - 工作池：保留"按 ConnID 取模分配 Worker 保证同连接有序"，增加：
   - 池大小与队列长度可配置（来自 kconf）；
   - 优雅关闭（ctx 取消后排空队列再退出）；
@@ -252,7 +251,7 @@ kinz/
 
 - 修复核心缺陷：实现真正 `dial`（`net.Dialer.DialContext`，连接超时可配）。
 - 自动重连：指数退避 + 抖动，`Restart/Stop` 语义明确（Stop 后不再自动重连）。
-- 与 Server 同构的消息管线：bufio+Decoder（缓冲池化）、拦截器、路由、心跳发送、`SendMsg` 非阻塞写。
+- 与 Server 同构的消息管线：ICodec（缓冲池化）、中间件、路由、心跳发送、`SendMsg` 非阻塞写。
 - 连接状态回调（OnConnStart/OnConnStop）语义与 Server 对齐。
 
 ### 6.13 MCP Server（新包 `kmcp`，P4）
@@ -290,7 +289,7 @@ kinz/
   - `mcp.md`：MCP Server 配置与使用；
   - `testing.md`：测试命令、模糊测试、基准测试；
   - `faq.md` 与 `production-checklist.md`（部署/压测/调参）。
-- **examples/（新 API）**：`ping`（最小回显）、`chatroom`（广播 + 心跳 + 满连接拒绝演示）、`auth-middleware`（拦截器链）、`mcp-stdio`（stdio MCP 接入演示）。
+- **examples/（新 API）**：`ping`（最小回显）、`chatroom`（广播 + 心跳 + 满连接拒绝演示）、`auth-middleware`（Use 中间件）、`mcp-stdio`（stdio MCP 接入演示）。
 - **代码注释规范**：所有导出符号补齐英文 doc comment（AI 与国际化友好）；中文保留在 README 与设计文档。
 - `INTERVIEW_GUIDE.md` 保留并在 P6 按新架构同步更新（属用户个人资产）。
 - 原 demo / mmo_game_zinx **不迁移**：按决策在 P1 删除归档（git 历史可回溯）。
@@ -319,7 +318,7 @@ kinz/
 - 退出标准：`go build ./...` 绿；`kiface` 无僵尸方法；`knet` 无 `panic("implement me")`；所有接口有英文注释；接口断言测试与 `klog` 测试通过。
 
 ### Phase 2 — 核心实现重写（P2）
-- 内容：`Server`（Run/Shutdown/Serve+信号）、`Connection`（状态机/缓冲写/存活/错误处理/缓冲池化）、消息管线（bufio+Decoder+拦截器接入）、`MsgHandler`（RouterSlices/中间件/工作池优雅关闭/panic 恢复）、心跳接通、满连接拒绝、`Request` 完整实现、kconf 加载链（YAML）。
+- 内容：`Server`（Run/Shutdown/Serve+信号）、`Connection`（状态机/缓冲写/存活/错误处理/缓冲池化）、消息管线（ICodec+中间件接入）、`MsgHandler`（RouterSlices/中间件/工作池优雅关闭/panic 恢复）、心跳接通、满连接拒绝、`Request` 完整实现、kconf 加载链（YAML）。
 - 新增测试：kconf 加载链、buffer pool、connection 生命周期（net.Pipe）、心跳超时断开、满连接拒绝、中间件/Group/Abort、优雅停机、echo 集成。
 - 退出标准：`examples/ping` 用新 API 跑通；上述新测试全绿（含 `-race`）；SIGTERM 优雅停机验证通过。
 
@@ -357,7 +356,7 @@ kinz/
 - 保留默认 TLV（小端）线协议不变，保证老客户端可通信；`knet.NewTLVPackWithOrder` 支持大端作为可选。
 - API 破坏点明确列出：`NewServer` → `NewServer(opts...)`；`Serve()` → `Serve(ctx)`/`Run(ctx)`；`utils.GlobalObject` → `kconf`；`SendMsg` 返回错误语义不变。
 - 原 demo / mmo_game_zinx 删除归档（git 历史可回溯），**不迁移**；新示例在 P2/P5 逐步建立。
-- 命名映射：`zinx→kinz`、`ziface→kiface`、`znet→knet`、`zlog→klog`、`zinterceptor→kinterceptor`、`utils→kconf`（新增）、`zmcp→kmcp`（新增）。
+- 命名映射：`zinx→kinz`、`ziface→kiface`、`znet→knet`、`zlog→klog`、`zinterceptor→kinterceptor`（P2 已删除）、`utils→kconf`（新增）、`zmcp→kmcp`（新增）。
 
 ## 9. 风险与取舍
 

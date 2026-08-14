@@ -10,7 +10,10 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 
 ## 关键设计决策（含对 P1 接口的修订，均需在 P2 落地）
 
-0. **P2 设计修订（用户反馈：codec 合并，覆盖原决策 1–4）**：`IDecoder`（帧解码）与 `IDataPack`（消息解析）两个耦合接口冗余（DataLen 解析两次、自定义协议需实现两个接口、且帧引用内部缓冲存在异步覆写的数据竞争）→ **合并为单一 `kiface.ICodec`**（`Decode(buff) ([]IMessage, error)` + `Pack` + `Clone`）。默认实现 `knet.TLVPack`（小端 TLV，内部缓冲处理粘包/半包，`Decode` 返回的消息 payload **独立复制**以修复数据竞争）；删除 `kinterceptor.FrameDecoder`、`kiface.LengthField`、`IDecoder`、`IDataPack`；`IServer`/`IClient` 的 `SetPacket/GetPacket/SetDecoder/GetDecoder` 统一为 `SetCodec/GetCodec`。`kinterceptor` 仅保留 Chain。
+0. **P2 设计修订（用户反馈）**：
+   - **codec 合并**（覆盖原决策 1–4）：`IDecoder`（帧解码）与 `IDataPack`（消息解析）两个耦合接口冗余 → **合并为单一 `kiface.ICodec`**（`Decode` + `Pack` + `Clone`），默认实现 `knet.TLVPack`（payload 独立复制修复数据竞争）；删除 `FrameDecoder`、`LengthField`；`IServer`/`IClient` 统一 `SetCodec/GetCodec`。
+   - **删除拦截器链**：`IInterceptor` 责任链与 `Use`/`Group` 中间件功能重叠且被完全覆盖 → 删除 `kinterceptor` 包、`IInterceptor/IChain/IcReq/IcResp`、`IRequest.GetResponse/SetResponse`、`AddInterceptor/SetHeadInterceptor`；`MsgHandler.Execute` 只做中间件链分发。
+   - **删除死配置字段**：`kconf.Config` 的 `HeartbeatInterval/HeartbeatTimeout/ReadIdleTimeout` 框架零读取（心跳由 `StartHeartBeat` 显式配置）→ 删除。
 1. **kiface 修订**（P2 接口修订，随 P2 提交）：
    - `IServer.Address() net.Addr`（Port=0 时测试/运维需要真实地址）
    - `HeartBeatOption.Timeout time.Duration`（超时判定，默认 3×interval）
@@ -19,7 +22,7 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 5. **kpool**：4K/16K/64K 三档 `sync.Pool`；`Get(size)` 返回 ≥size 档位缓冲，超 64K 直接分配；`Put` 校验档位，不匹配静默丢弃；Put 时首字节写哨兵 0xAA（误用检测）。
 6. **kconf**：`Config` 全字段 + `Duration` 自定义类型（YAML 支持 "10s" 字符串与纳秒整数）；加载链 默认→`conf/kinz.yaml`（缺失不 panic，非法报错）→`KINZ_*` 环境变量（非法报错）；`Load(path) (*Config, error)`。
 7. **Connection**：`stopOnce sync.Once` 幂等清理（hooks/hb 停止/socket 关闭/done 关闭/ConnMgr 移除），Reader 的 defer 只调 `stopOnce`（不等待自身），外部 `Stop()` = stopOnce + `wg.Wait`；`msgChan` 缓冲 `WriteQueueSize`（默认 256）**永不 close**，Writer 靠 done 退出；`SendMsg` 三路 select（msgChan/done/WriteTimeout）；`lastActivity` 原子时间戳，任何消息刷新，`IsAlive(timeout)` 判定。
-8. **MsgHandler**：`classicApis`（IRouter）+ `apis`（RouterHandler 切片）+ `globalHandlers` + `groupRanges`；`routerSlices`/`groupRouterSlices` 具体类型实现 P1 接口；`Execute` = 拦截器链（headInterceptor 优先）→ dispatch（含 recover）；Worker 池 ctx 取消 + 排空退出；池大小为 0 时直启 goroutine；重复注册返回 `ErrMsgIDRegistered`。
+8. **MsgHandler**：`classicApis`（IRouter）+ `apis`（RouterHandler 切片）+ `globalHandlers` + `groupRanges`；`routerSlices`/`groupRouterSlices` 具体类型实现 P1 接口；`Execute` = 中间件链分发（含 recover）；Worker 池 ctx 取消 + 排空退出；池大小为 0 时直启 goroutine；重复注册返回 `ErrMsgIDRegistered`。
 9. **心跳接线**：`StartHeartBeat(interval)`/`SetHeartBeatWithOption` 生成模板存入 Server；`Connection.Start()` 克隆模板→BindConn→Start；默认路由 `HeartBeatDefaultHandle` 自动注册（忽略重复注册错误）；修复旧 `if msgFunc == nil` 判断写反的 bug。
 10. **满连接拒绝**：accept 循环 `connMgr.Add` 返回 `ErrServerFull` → `rejectConn`：打包发送 `ServerFullMsgID` 消息（写超时保护）→ 关闭。
 11. **Server 生命周期**：`Run(ctx)` 启动 listener/Worker 池/accept 循环，阻塞至 ctx 取消返回 nil；`Shutdown(ctx)` = 关 listener → `ClearConn` 排空（ctx 超时）→ `StopWorkerPool(ctx)`，幂等；`Serve(ctx)` = Run + Shutdown 组合；`connID` 原子递增。
@@ -31,7 +34,8 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 | T1 | go.mod + kiface 修订 | `go.mod`、`kiface/idecoder.go`、`kiface/iserver.go`、`kiface/iheartbeat.go`、`kiface/errors.go`(常量) | 编译期断言随 T5 更新 |
 | T2 | kconf | `kconf/config.go`、`kconf/config_test.go` | 默认/缺文件/YAML/非法 YAML/env 覆盖 |
 | T3 | kpool | `kpool/pool.go`、`kpool/pool_test.go` | 档位获取/复用/误尺寸丢弃/大缓冲直配 |
-| T4 | codec 合并：TLVPack(ICodec) + 删 FrameDecoder/LengthField | `kiface/icodec.go`、`knet/datapack.go`、`kinterceptor/` | 往返/半包/粘包/超长/大端/Clone/payload 独立 |
+| T4 | codec 合并：TLVPack(ICodec) + 删 FrameDecoder/LengthField | `kiface/icodec.go`、`knet/datapack.go` | 往返/半包/粘包/超长/大端/Clone/payload 独立 |
+| T4b | 删拦截器链（kinterceptor 包、IInterceptor、GetResponse/SetResponse）+ 删死配置字段 | `kiface/*`、`knet/*`、`kconf/*` | 既有测试全绿 + 覆盖率门禁 |
 | T5 | Request | `knet/request.go` | 上下文/Copy/Abort 语义（随 T6 测试） |
 | T6 | RouterSlices+MsgHandler | `knet/routerSlices.go`、`knet/msgHandler.go` | 重复注册/中间件顺序/Abort/Group 越界/panic 恢复 |
 | T7 | HeartBeatChecker | `knet/heartbeat.go` | 存活/超时回调/默认消息/Set 函数非 nil 判断 |
@@ -43,7 +47,7 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 ## 覆盖率门禁（P2 退出标准）
 
 - `go build ./...`、`go vet ./...`、`go test ./...` 全绿（`-race` 因本机无 C 工具链，环境可用时执行）
-- 覆盖率：kconf ≥ 80%、kpool ≥ 80%、kinterceptor ≥ 70%、knet ≥ 55%（集成测试驱动）
+- 覆盖率：kconf ≥ 80%、kpool ≥ 80%、knet ≥ 55%（集成测试驱动）
 - `examples/ping` 可编译
 - 无 `panic("implement me")`、无裸 panic 表达协议错误、无 `fmt.Printf` 日志（全部走 klog）
 
