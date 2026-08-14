@@ -1,7 +1,9 @@
 package kmetrics
 
 import (
-	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -12,47 +14,13 @@ func TestCounter(t *testing.T) {
 	c.Inc()
 	c.Inc()
 	c.Add(3)
-	if c.Value() != 5 {
-		t.Fatalf("Value = %d, want 5", c.Value())
-	}
-	// idempotent creation returns the same metric
-	if r.Counter("kinz_test_total", "test counter") != c {
-		t.Fatal("Counter(name) returned a different instance")
-	}
-}
-
-func TestHistogramObserve(t *testing.T) {
-	r := NewRegistry()
-	h := r.Histogram("kinz_test_duration", "test histogram", []float64{0.5, 1.0})
-
-	// values are binary-exact so the sum assertion is exact
-	for _, v := range []float64{0.25, 0.5, 0.75, 1.5} {
-		h.Observe(v)
-	}
-	if h.Count() != 4 {
-		t.Fatalf("Count = %d, want 4", h.Count())
-	}
 
 	snap := r.Snapshot()
-	hs := snap.Histograms["kinz_test_duration"]
-	if hs.Count != 4 || hs.Sum != 3.0 {
-		t.Fatalf("snapshot count/sum = %d/%v, want 4/3.0", hs.Count, hs.Sum)
+	if snap.Counters["kinz_test_total"] != 5 {
+		t.Fatalf("counter = %d, want 5", snap.Counters["kinz_test_total"])
 	}
-	// cumulative le counts: <=0.5 -> 2, <=1.0 -> 3
-	if len(hs.Counts) != 2 || hs.Counts[0] != 2 || hs.Counts[1] != 3 {
-		t.Fatalf("cumulative counts = %v, want [2 3]", hs.Counts)
-	}
-}
-
-func TestHistogramDefaultBuckets(t *testing.T) {
-	r := NewRegistry()
-	h := r.Histogram("kinz_test_default", "h", nil)
-	if len(h.buckets) != len(DefaultBuckets) {
-		t.Fatalf("buckets = %d, want %d defaults", len(h.buckets), len(DefaultBuckets))
-	}
-	h.Observe(0.001)
-	if h.Count() != 1 {
-		t.Fatal("observe failed")
+	if r.Counter("kinz_test_total", "test counter") != c {
+		t.Fatal("Counter(name) returned a different instance")
 	}
 }
 
@@ -62,68 +30,82 @@ func TestGauge(t *testing.T) {
 	g.Inc()
 	g.Inc()
 	g.Dec()
-	if g.Value() != 1 {
-		t.Fatalf("Value = %d, want 1", g.Value())
-	}
 	g.Set(7)
-	if g.Value() != 7 {
-		t.Fatalf("Value = %d, want 7", g.Value())
-	}
+
 	snap := r.Snapshot()
 	if snap.Gauges["kinz_test_active"] != 7 {
-		t.Fatalf("gauge snapshot = %v", snap.Gauges)
+		t.Fatalf("gauge = %d, want 7", snap.Gauges["kinz_test_active"])
 	}
 }
 
-func TestSnapshotContainsAll(t *testing.T) {
+func TestHistogramObserve(t *testing.T) {
 	r := NewRegistry()
-	r.Counter("kinz_a_total", "a").Inc()
-	r.Histogram("kinz_b", "b", nil).Observe(1)
+	h := r.Histogram("kinz_test_duration", "test histogram", []float64{0.5, 1.0})
+
+	for _, v := range []float64{0.25, 0.5, 0.75, 1.5} {
+		h.Observe(v)
+	}
 
 	snap := r.Snapshot()
-	if snap.Counters["kinz_a_total"] != 1 {
-		t.Fatalf("counter snapshot = %v", snap.Counters)
-	}
-	if _, ok := snap.Histograms["kinz_b"]; !ok {
+	hs, ok := snap.Histograms["kinz_test_duration"]
+	if !ok {
 		t.Fatal("histogram missing from snapshot")
 	}
+	if hs.Count != 4 || hs.Sum != 3.0 {
+		t.Fatalf("count/sum = %d/%v, want 4/3.0", hs.Count, hs.Sum)
+	}
+	// client_golang returns configured buckets only (the +Inf bucket is
+	// implicit in the text format); cumulative counts: <=0.5 -> 2, <=1.0 -> 3.
+	if len(hs.Buckets) != 2 || hs.Counts[0] != 2 || hs.Counts[1] != 3 {
+		t.Fatalf("buckets/counts = %v / %v", hs.Buckets, hs.Counts)
+	}
 }
 
-func TestWritePrometheusText(t *testing.T) {
+func TestHistogramDefaultBuckets(t *testing.T) {
+	r := NewRegistry()
+	h := r.Histogram("kinz_test_default", "h", nil)
+	h.Observe(0.001)
+	snap := r.Snapshot()
+	if snap.Histograms["kinz_test_default"].Count != 1 {
+		t.Fatal("observe failed")
+	}
+}
+
+func TestSnapshotEmpty(t *testing.T) {
+	r := NewRegistry()
+	snap := r.Snapshot()
+	if len(snap.Counters) != 0 || len(snap.Gauges) != 0 || len(snap.Histograms) != 0 {
+		t.Fatalf("expected empty snapshot, got %+v", snap)
+	}
+}
+
+func TestHandlerServesMetrics(t *testing.T) {
 	r := NewRegistry()
 	r.Counter("kinz_conns_total", "total connections").Add(7)
-	h := r.Histogram("kinz_duration", "handle duration", []float64{0.5, 1.0})
-	h.Observe(0.25)
-	h.Observe(0.75)
+	r.Gauge("kinz_conns_active", "active").Set(2)
+	r.Histogram("kinz_duration", "d", nil).Observe(0.25)
 
-	var buf bytes.Buffer
-	if err := r.WritePrometheusText(&buf); err != nil {
-		t.Fatalf("WritePrometheusText: %v", err)
+	ts := httptest.NewServer(r.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
 	}
-	out := buf.String()
-
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	out := string(body)
 	for _, want := range []string{
-		"# HELP kinz_conns_total total connections",
-		"# TYPE kinz_conns_total counter",
 		"kinz_conns_total 7",
-		"# TYPE kinz_duration histogram",
-		`kinz_duration_bucket{le="0.5"} 1`,
-		`kinz_duration_bucket{le="1"} 2`,
-		`kinz_duration_bucket{le="+Inf"} 2`,
-		"kinz_duration_sum 1",
-		"kinz_duration_count 2",
+		"kinz_conns_active 2",
+		"kinz_duration_bucket",
+		"kinz_duration_count 1",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("output missing %q:\n%s", want, out)
+			t.Fatalf("metrics body missing %q:\n%s", want, out)
 		}
-	}
-}
-
-func TestFormatFloatSpecialValues(t *testing.T) {
-	if formatFloat(0.5) != "0.5" {
-		t.Fatalf("formatFloat(0.5) = %s", formatFloat(0.5))
-	}
-	if formatFloat(1e6) != "1e+06" && formatFloat(1e6) != "1000000" {
-		t.Fatalf("unexpected large float format: %s", formatFloat(1e6))
 	}
 }

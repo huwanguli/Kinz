@@ -326,6 +326,7 @@ kinz/
 ### Phase 3 — 生产化（P3）
 - 内容：日志环形缓冲后端（供 MCP `get_logs`，klog slog 重写已在 P1 完成）、全部日志迁移到 klog、哨兵错误、kmetrics + Prometheus 端点、TLS、Client 完整重写（重连/心跳/超时）。
 - **P3 落地修订**：① `kmetrics` 分层——零依赖测量层（Counter/Gauge/Histogram/Snapshot）+ 内置 `WritePrometheusText`（手写文本，测试用**官方解析器当裁判**验证）+ 可选 `kmetrics/prometheus` 子包（官方客户端镜像）；`Server.GetMetrics/AttachMetrics(addr)`。② `IConnection.GetConn() *net.TCPConn` → `GetConn() net.Conn`（TLS 必需）。③ Client 复用连接生命周期：新增内部 `connHost` 抽象（Server/Client 共同实现，Connection 依赖它）。④ Client 的 `Start()` 必须 `StartWorkerPool()`（修复突发发送时消息乱序的 bug）。⑤ kconf `KINZ_*` 覆盖全部字段。
+- **P3 再修订（用户决策：指标直接用官方库）**：`kmetrics` 改为 **prometheus/client_golang 适配器**（写句柄 + `Gather`→`Snapshot` 读，`promhttp.Handler` 暴露）；删除手写 `WritePrometheusText`、解析器裁判测试与 `kmetrics/prometheus` 子包；核心依赖变为 yaml + client_golang（标配库，可接受）。
 - 新增测试：日志级别/格式、指标计数、TLS 握手、Client 断线重连、错误哨兵断言。
 - 退出标准：日志结构化可查；panic 处理器不炸进程；指标可读；TLS 握手验证通过；Client 断线重连验证通过；新测试全绿。
 

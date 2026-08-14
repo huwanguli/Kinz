@@ -43,7 +43,7 @@ go test -race ./...
 - **Client** (`knet/client.go`): full implementation — dial (TCP or TLS), auto-reconnect with exponential backoff + jitter (`WithReconnect`), heartbeat, routing, worker pool. Shares the connection lifecycle with Server via the internal `connHost` abstraction.
 - **Routing** (`knet/msgHandler.go` + `routerSlices.go`): single function-style routing (`AddRouterSlices` + `Use`/`Group` middleware) with onion-model before/after semantics, `Abort`, panic recovery, worker pool with graceful drain, blocking backpressure + `queue_full` metric.
 - **Heartbeat** (`knet/heartbeat.go`): interval + timeout, any-message liveness, `OnRemoteNotAlive` defaults to graceful close, clone-per-connection, `heartbeat_missed` metric.
-- **Metrics** (`kmetrics`): zero-dependency measurement layer (counters/gauges/histograms), `Snapshot()` for MCP, built-in `WritePrometheusText`, opt-in `kmetrics/prometheus` subpackage using the official client. The hand-written text format is validated by the official parser in tests.
+- **Metrics** (`kmetrics`): measurement layer built on the standard `prometheus/client_golang` (write-only Counter/Gauge/Histogram handles with kinz_* names, deduplicated by name). Reads go through `Snapshot()` (for MCP get_metrics) or the `promhttp.Handler()` / `Server.AttachMetrics(addr)` endpoint. No hand-written exposition format to maintain.
 - **MCP** (`kmcp`): **opt-in** adapter built on mark3labs/mcp-go with 10 tools (server_info, list/get/send/broadcast/close connections, get_metrics, get_config, get_logs, shutdown_server) and 4 resources (connections://, metrics://, config://, logs://). Transports: stdio + streamable HTTP (`ServeStdio` / `ServeHTTP` / `Handler`), `WithAuth` hook. It is a standalone adapter (never imported by knet — the core stays SDK-free); wire it yourself: `kmcp.NewServer(srv, ...).ServeHTTP(addr)`.
 - **TLS**: `WithTLS` (server) / `WithTLSClient` (client) with a self-signed-cert integration test.
 - **Config** (`kconf`): defaults → `conf/kinz.yaml` → full `KINZ_*` env coverage.
@@ -70,8 +70,8 @@ knet/          runtime (Server, Client, Connection, MsgHandler, ConnManager,
 klog/          ILogger + slog default implementation + ring buffer
 kconf/         Config (defaults / YAML / env)
 kpool/         size-classed sync.Pool buffers
-kmetrics/      zero-dep measurement layer + kmetrics/prometheus (official client)
-kmcp/          MCP server (JSON-RPC 2.0, stdio/TCP) exposing the runtime
+kmetrics/      measurement layer over prometheus/client_golang (Snapshot + promhttp handler)
+kmcp/          MCP server (mark3labs/mcp-go, stdio/streamable HTTP) exposing the runtime
 examples/      runnable demos (echo server + client)
 docs/          design spec + implementation plans + mcp.md + interview guide
 .github/       CI reference workflow (not required to run locally)

@@ -1,100 +1,67 @@
-// Package kmetrics is the Kinz measurement layer: type-safe atomic counters
-// and histograms with zero external dependencies. Framework code only touches
-// this package; exporters are pluggable:
+// Package kmetrics is the Kinz measurement layer, built on the standard Go
+// metrics library prometheus/client_golang. It provides:
 //
-//   - built-in Prometheus text format: Registry.WritePrometheusText
-//   - official Prometheus client (opt-in): kmetrics/prometheus
-//   - MCP (later phase): Registry.Snapshot
+//   - named, deduplicated Counter / Gauge / Histogram handles (write-only,
+//     client_golang semantics: reads go through Snapshot)
+//   - a framework-neutral Snapshot for MCP and other consumers
+//   - a ready-made promhttp.Handler for the /metrics endpoint
 //
-// Metric names follow the Prometheus convention: counters end with _total.
+// Framework code only touches this package; client_golang is the
+// battle-tested implementation underneath (labels, OpenMetrics, exemplars).
 package kmetrics
 
 import (
-	"fmt"
-	"math"
-	"strconv"
+	"net/http"
 	"sync"
-	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 )
 
-// Counter is a monotonically increasing counter (Prometheus counter semantics).
+// Counter is a monotonically increasing counter (write-only handle; read via
+// Registry.Snapshot or the metrics endpoint).
 type Counter struct {
-	name  string
-	help  string
-	value atomic.Uint64
+	inner prometheus.Counter
 }
 
 // Inc increments the counter by one.
-func (c *Counter) Inc() { c.value.Add(1) }
+func (c *Counter) Inc() { c.inner.Inc() }
 
 // Add increments the counter by v.
-func (c *Counter) Add(v uint64) { c.value.Add(v) }
+func (c *Counter) Add(v uint64) { c.inner.Add(float64(v)) }
 
-// Value returns the current value.
-func (c *Counter) Value() uint64 { return c.value.Load() }
-
-// Gauge is a value that can go up and down (Prometheus gauge semantics).
+// Gauge is a value that can go up and down (write-only handle).
 type Gauge struct {
-	name  string
-	help  string
-	value atomic.Int64
+	inner prometheus.Gauge
 }
 
 // Inc increments the gauge by one.
-func (g *Gauge) Inc() { g.value.Add(1) }
+func (g *Gauge) Inc() { g.inner.Inc() }
 
 // Dec decrements the gauge by one.
-func (g *Gauge) Dec() { g.value.Add(-1) }
+func (g *Gauge) Dec() { g.inner.Dec() }
 
 // Set sets the gauge to v.
-func (g *Gauge) Set(v int64) { g.value.Store(v) }
+func (g *Gauge) Set(v int64) { g.inner.Set(float64(v)) }
 
-// Value returns the current value.
-func (g *Gauge) Value() int64 { return g.value.Load() }
-
-// Histogram observes values into fixed upper-bound buckets (Prometheus
-// histogram semantics: buckets are cumulative "le" counts).
+// Histogram observes values into fixed upper-bound buckets (write-only handle).
 type Histogram struct {
-	name    string
-	help    string
-	buckets []float64 // sorted upper bounds; +Inf is implicit
-
-	mu     sync.Mutex
-	counts []uint64 // per-bucket counts (not cumulative)
-	count  uint64
-	sum    float64
+	inner prometheus.Histogram
 }
 
 // DefaultBuckets are the Prometheus default duration buckets (seconds).
-var DefaultBuckets = []float64{
-	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
-}
+var DefaultBuckets = prometheus.DefBuckets
 
 // Observe records one observation v.
-func (h *Histogram) Observe(v float64) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.count++
-	h.sum += v
-	for i, ub := range h.buckets {
-		if v <= ub {
-			h.counts[i]++
-			break
-		}
-	}
-}
+func (h *Histogram) Observe(v float64) { h.inner.Observe(v) }
 
-// Count returns the number of observations.
-func (h *Histogram) Count() uint64 {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.count
-}
-
-// Registry owns a named set of metrics. Metric creation is idempotent:
-// requesting the same name twice returns the existing metric.
+// Registry owns a named set of metrics over a prometheus.Registry.
+// Metric creation is idempotent: requesting the same name twice returns the
+// existing metric.
 type Registry struct {
 	mu         sync.RWMutex
+	promReg    *prometheus.Registry
 	counters   map[string]*Counter
 	gauges     map[string]*Gauge
 	histograms map[string]*Histogram
@@ -103,6 +70,7 @@ type Registry struct {
 // NewRegistry creates an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
+		promReg:    prometheus.NewRegistry(),
 		counters:   make(map[string]*Counter),
 		gauges:     make(map[string]*Gauge),
 		histograms: make(map[string]*Histogram),
@@ -110,7 +78,6 @@ func NewRegistry() *Registry {
 }
 
 // Counter returns the counter registered under name, creating it on first use.
-// name should follow the Prometheus convention ([a-zA-Z_:][a-zA-Z0-9_:]*).
 func (r *Registry) Counter(name, help string) *Counter {
 	r.mu.RLock()
 	c, ok := r.counters[name]
@@ -123,7 +90,8 @@ func (r *Registry) Counter(name, help string) *Counter {
 	if c, ok := r.counters[name]; ok {
 		return c
 	}
-	c = &Counter{name: name, help: help}
+	c = &Counter{inner: prometheus.NewCounter(prometheus.CounterOpts{Name: name, Help: help})}
+	r.promReg.MustRegister(c.inner)
 	r.counters[name] = c
 	return c
 }
@@ -141,13 +109,14 @@ func (r *Registry) Gauge(name, help string) *Gauge {
 	if g, ok := r.gauges[name]; ok {
 		return g
 	}
-	g = &Gauge{name: name, help: help}
+	g = &Gauge{inner: prometheus.NewGauge(prometheus.GaugeOpts{Name: name, Help: help})}
+	r.promReg.MustRegister(g.inner)
 	r.gauges[name] = g
 	return g
 }
 
 // Histogram returns the histogram registered under name, creating it on first
-// use. Empty buckets fall back to DefaultBuckets.
+// use. Empty buckets fall back to prometheus.DefBuckets.
 func (r *Registry) Histogram(name, help string, buckets []float64) *Histogram {
 	r.mu.RLock()
 	h, ok := r.histograms[name]
@@ -163,7 +132,12 @@ func (r *Registry) Histogram(name, help string, buckets []float64) *Histogram {
 	if h, ok := r.histograms[name]; ok {
 		return h
 	}
-	h = &Histogram{name: name, help: help, buckets: append([]float64(nil), buckets...), counts: make([]uint64, len(buckets))}
+	h = &Histogram{inner: prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    name,
+		Help:    help,
+		Buckets: append([]float64(nil), buckets...),
+	})}
+	r.promReg.MustRegister(h.inner)
 	r.histograms[name] = h
 	return h
 }
@@ -175,114 +149,61 @@ type Snapshot struct {
 	Histograms map[string]HistogramSnapshot
 }
 
-// HistogramSnapshot is a point-in-time histogram.
+// HistogramSnapshot is a point-in-time histogram (buckets are cumulative "le"
+// counts, including the +Inf bucket).
 type HistogramSnapshot struct {
-	Buckets []float64 // upper bounds (excludes +Inf)
-	Counts  []uint64  // cumulative counts per bucket (le semantics)
+	Buckets []float64
+	Counts  []uint64
 	Count   uint64
 	Sum     float64
 }
 
-// Snapshot captures the current state of all metrics.
+// Snapshot captures the current state of all metrics via the prometheus
+// Gatherer.
 func (r *Registry) Snapshot() Snapshot {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
+	families, err := r.promReg.Gather()
+	if err != nil {
+		return Snapshot{
+			Counters:   map[string]uint64{},
+			Gauges:     map[string]int64{},
+			Histograms: map[string]HistogramSnapshot{},
+		}
+	}
 	snap := Snapshot{
-		Counters:   make(map[string]uint64, len(r.counters)),
-		Gauges:     make(map[string]int64, len(r.gauges)),
-		Histograms: make(map[string]HistogramSnapshot, len(r.histograms)),
+		Counters:   make(map[string]uint64, len(families)),
+		Gauges:     make(map[string]int64, len(families)),
+		Histograms: make(map[string]HistogramSnapshot, len(families)),
 	}
-	for name, c := range r.counters {
-		snap.Counters[name] = c.Value()
-	}
-	for name, g := range r.gauges {
-		snap.Gauges[name] = g.Value()
-	}
-	for name, h := range r.histograms {
-		h.mu.Lock()
-		snap.Histograms[name] = histogramSnapshotLocked(h)
-		h.mu.Unlock()
+	for _, family := range families {
+		name := family.GetName()
+		if len(family.Metric) == 0 {
+			continue
+		}
+		switch family.GetType() {
+		case dto.MetricType_COUNTER:
+			snap.Counters[name] = uint64(family.Metric[0].GetCounter().GetValue())
+		case dto.MetricType_GAUGE:
+			snap.Gauges[name] = int64(family.Metric[0].GetGauge().GetValue())
+		case dto.MetricType_HISTOGRAM:
+			snap.Histograms[name] = histogramSnapshot(family.Metric[0].GetHistogram())
+		}
 	}
 	return snap
 }
 
-func histogramSnapshotLocked(h *Histogram) HistogramSnapshot {
+func histogramSnapshot(h *dto.Histogram) HistogramSnapshot {
 	hs := HistogramSnapshot{
-		Buckets: append([]float64(nil), h.buckets...),
-		Counts:  make([]uint64, len(h.buckets)),
-		Count:   h.count,
-		Sum:     h.sum,
+		Count: h.GetSampleCount(),
+		Sum:   h.GetSampleSum(),
 	}
-	cum := uint64(0)
-	for i, n := range h.counts {
-		cum += n
-		hs.Counts[i] = cum
+	for _, b := range h.GetBucket() {
+		hs.Buckets = append(hs.Buckets, b.GetUpperBound())
+		hs.Counts = append(hs.Counts, b.GetCumulativeCount())
 	}
 	return hs
 }
 
-// WritePrometheusText writes the metrics in the Prometheus text exposition
-// format (https://prometheus.io/docs/instrumenting/exposition_formats/).
-func (r *Registry) WritePrometheusText(w writer) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for name, c := range r.counters {
-		if err := writeCounter(w, name, c.help, c.Value()); err != nil {
-			return err
-		}
-	}
-	for name, g := range r.gauges {
-		if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %d\n", name, g.help, name, name, g.Value()); err != nil {
-			return err
-		}
-	}
-	for name, h := range r.histograms {
-		h.mu.Lock()
-		hs := histogramSnapshotLocked(h)
-		h.mu.Unlock()
-		if err := writeHistogram(w, name, h.help, hs); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type writer interface{ Write([]byte) (int, error) }
-
-func writeCounter(w writer, name, help string, value uint64) error {
-	if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, value); err != nil {
-		return err
-	}
-	return nil
-}
-
-func writeHistogram(w writer, name, help string, h HistogramSnapshot) error {
-	if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s histogram\n", name, help, name); err != nil {
-		return err
-	}
-	for i, ub := range h.Buckets {
-		if _, err := fmt.Fprintf(w, "%s_bucket{le=%q} %d\n", name, formatFloat(ub), h.Counts[i]); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(w, "%s_bucket{le=\"+Inf\"} %d\n%s_sum %s\n%s_count %d\n",
-		name, h.Count, name, formatFloat(h.Sum), name, h.Count); err != nil {
-		return err
-	}
-	return nil
-}
-
-// formatFloat renders a float in Prometheus syntax (special values included).
-func formatFloat(v float64) string {
-	switch {
-	case math.IsNaN(v):
-		return "NaN"
-	case math.IsInf(v, 1):
-		return "+Inf"
-	case math.IsInf(v, -1):
-		return "-Inf"
-	default:
-		return strconv.FormatFloat(v, 'g', -1, 64)
-	}
+// Handler returns a promhttp.Handler serving this registry's metrics.
+func (r *Registry) Handler() http.Handler {
+	return promhttp.HandlerFor(r.promReg, promhttp.HandlerOpts{})
 }

@@ -94,21 +94,15 @@ func NewServer(opts ...Option) kiface.IServer {
 // GetMetrics implements kiface.IServer.
 func (s *Server) GetMetrics() *kmetrics.Registry { return s.metrics }
 
-// AttachMetrics implements kiface.IServer: serves the built-in Prometheus
-// text endpoint (/metrics) on addr. For the official client, use
-// kmetrics/prometheus.NewHandler(s.GetMetrics()) with your own HTTP mux.
+// AttachMetrics implements kiface.IServer: serves the metrics endpoint
+// (/metrics) on addr via the official promhttp handler.
 func (s *Server) AttachMetrics(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		if err := s.metrics.WritePrometheusText(w); err != nil {
-			klog.L().Warn("write metrics failed", "err", err)
-		}
-	})
+	mux.Handle("/metrics", s.metrics.Handler())
 	srv := &http.Server{Handler: mux}
 	s.mu.Lock()
 	if s.metricsListener != nil {
