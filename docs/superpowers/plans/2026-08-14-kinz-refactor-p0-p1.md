@@ -1289,6 +1289,8 @@ go tool cover -func=cover.out | Select-String -Pattern 'datapack.go|message.go|t
 
 Expected: `datapack.go`、`message.go` 行覆盖率 **≥ 80%**，total 供记录（桩代码会拉低 total，属预期）。
 
+**Task 4 追加（用户反馈）**：大小端通用化——`DataPack` 增加 `order binary.ByteOrder` 字段与 `NewDataPackWithOrder(order)` 构造函数（nil 回退小端），默认保持小端以兼容旧线协议；P2 由 kconf 配置。新增 `TestDataPackBigEndian` 验证大端封解包与线格式字节序。原则：字节序是线协议决策，显式声明、可配置，不做运行时主机字节序探测。
+
 - [ ] **Step 7: 提交**
 
 ```bash
