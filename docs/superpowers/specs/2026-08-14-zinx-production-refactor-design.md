@@ -331,6 +331,7 @@ kinz/
 
 ### Phase 4 — MCP Server（P4）
 - 内容：`kmcp` 包（协议、stdio/TCP transport、工具与资源）、`AttachMCP` 接入、鉴权回调、环形日志后端接线、`docs/mcp.md`。
+- **P4 落地修订**：① 接入方式从 `srv.AttachMCP(...)` 改为**独立适配器** `kmcp.NewServer(srv, opts...).ListenAndServe(addr)` / `.ServeStdio()`——`kmcp` 只依赖 `kiface/kconf/klog/kmetrics`、不依赖 `knet`（应用接线），避免 `knet↔kmcp` 循环依赖；② 新增 `IConnManager.Range`（枚举连接，供 list_connections/broadcast）；③ `kconf.Config` 补 json tag（get_config 输出）；④ 10 工具 + 4 资源全部落地（见 `docs/mcp.md`）。
 - 新增测试：JSON-RPC 编解码、握手、工具调用（用 mock 的 Server Runtime 接口）、stdio 传输。
 - 退出标准：任意 MCP 客户端（或手写最小客户端）能完成握手、列出工具、读取连接/指标、向连接发消息、广播、关连接、触发停机。
 

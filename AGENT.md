@@ -6,7 +6,7 @@ This file provides guidance to AI coding agents (Claude Code, Copilot, Gemini CL
 
 Kinz is a lightweight TCP server framework written in Go (Go 1.25), being refactored from the legacy Zinx codebase into a production-ready framework. The refactor runs in phases P0–P6 (see `docs/superpowers/specs/2026-08-14-zinx-production-refactor-design.md`); the repository is currently at the **end of P2** (core implementation rewrite).
 
-Module name: `kinz`. Packages: `kiface` (contract layer), `knet` (implementations), `klog` (slog-based logger), `kconf` (YAML config), `kpool` (sync.Pool buffers), `kmetrics` (zero-dep measurement layer + opt-in official-client bridge). Planned in later phases: `kmcp` (MCP server), `configs/`, `cmd/`.
+Module name: `kinz`. Packages: `kiface` (contract layer), `knet` (implementations), `klog` (slog-based logger), `kconf` (YAML config), `kpool` (sync.Pool buffers), `kmetrics` (zero-dep measurement layer + opt-in official-client bridge), `kmcp` (MCP server exposing the runtime to AI tools). Planned in later phases: `configs/`, `cmd/`.
 
 ## Build & Test Commands
 
@@ -36,14 +36,15 @@ go test -race ./...
 
 > Note: `go test -race` requires CGO + a C toolchain (gcc/ld). It does **not** run on this dev machine (no compiler installed); use CI (ubuntu) or install mingw. All other commands run locally.
 
-## Current State (end of P3)
+## Current State (end of P4)
 
 - **Server** (`knet/server.go`): `Run(ctx)` / `Shutdown(ctx)` / `Serve(ctx)` lifecycle with graceful shutdown, `Address()`, max-conn rejection, heartbeat template wiring, option-based construction (`WithConfig`/`WithMaxConn`/`WithName`/`WithTLS`), Prometheus `/metrics` endpoint via `AttachMetrics(addr)`, `GetMetrics()`.
 - **Connection** (`knet/connection.go`): reader/writer goroutines, buffered write queue with timeout, atomic liveness, idempotent `Stop` via `sync.Once`, pooled read buffer, per-connection codec clone, metrics counters. `GetConn()` returns `net.Conn` (plain TCP or TLS).
-- **Client** (`knet/client.go`): full implementation — dial (TCP or TLS), auto-reconnect with exponential backoff + jitter (`WithReconnect`), heartbeat, routing, worker pool. Shares the connection lifecycle with Server via the internal `connHost` abstraction. `Client.Start()` starts the worker pool (missed before, causing out-of-order dispatch under burst sends).
+- **Client** (`knet/client.go`): full implementation — dial (TCP or TLS), auto-reconnect with exponential backoff + jitter (`WithReconnect`), heartbeat, routing, worker pool. Shares the connection lifecycle with Server via the internal `connHost` abstraction.
 - **Routing** (`knet/msgHandler.go` + `routerSlices.go`): single function-style routing (`AddRouterSlices` + `Use`/`Group` middleware) with onion-model before/after semantics, `Abort`, panic recovery, worker pool with graceful drain, blocking backpressure + `queue_full` metric.
 - **Heartbeat** (`knet/heartbeat.go`): interval + timeout, any-message liveness, `OnRemoteNotAlive` defaults to graceful close, clone-per-connection, `heartbeat_missed` metric.
 - **Metrics** (`kmetrics`): zero-dependency measurement layer (counters/gauges/histograms), `Snapshot()` for MCP, built-in `WritePrometheusText`, opt-in `kmetrics/prometheus` subpackage using the official client. The hand-written text format is validated by the official parser in tests.
+- **MCP** (`kmcp`): zero-dependency MCP server (JSON-RPC 2.0, newline-delimited) with 10 tools (server_info, list/get/send/broadcast/close connections, get_metrics, get_config, get_logs, shutdown_server) and 4 resources (connections://, metrics://, config://, logs://). stdio + TCP transports, `WithAuth` hook. It is a standalone adapter (only imports kiface/kconf/klog/kmetrics — never knet), wired by the app: `kmcp.NewServer(srv, ...).ListenAndServe(addr)`.
 - **TLS**: `WithTLS` (server) / `WithTLSClient` (client) with a self-signed-cert integration test.
 - **Config** (`kconf`): defaults → `conf/kinz.yaml` → full `KINZ_*` env coverage.
 - **klog**: slog-based logger + ring-buffer backend (`klog.NewRingBuffer`, `Lines(n)` for MCP get_logs).
@@ -70,8 +71,9 @@ klog/          ILogger + slog default implementation + ring buffer
 kconf/         Config (defaults / YAML / env)
 kpool/         size-classed sync.Pool buffers
 kmetrics/      zero-dep measurement layer + kmetrics/prometheus (official client)
+kmcp/          MCP server (JSON-RPC 2.0, stdio/TCP) exposing the runtime
 examples/      runnable demos (echo server + client)
-docs/          design spec + implementation plans + interview guide
+docs/          design spec + implementation plans + mcp.md + interview guide
 .github/       CI reference workflow (not required to run locally)
 ```
 
