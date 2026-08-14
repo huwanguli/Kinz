@@ -115,10 +115,10 @@ type messageStub struct {
 	id uint32
 }
 
-func (m *messageStub) GetMsgID() uint32    { return m.id }
-func (m *messageStub) GetDataLen() uint32  { return 0 }
-func (m *messageStub) GetData() []byte     { return nil }
-func (m *messageStub) GetRawData() []byte  { return nil }
-func (m *messageStub) SetMsgID(uint32)     {}
-func (m *messageStub) SetData([]byte)      {}
-func (m *messageStub) SetDataLen(uint32)   {}
+func (m *messageStub) GetMsgID() uint32   { return m.id }
+func (m *messageStub) GetDataLen() uint32 { return 0 }
+func (m *messageStub) GetData() []byte    { return nil }
+func (m *messageStub) GetRawData() []byte { return nil }
+func (m *messageStub) SetMsgID(uint32)    {}
+func (m *messageStub) SetData([]byte)     {}
+func (m *messageStub) SetDataLen(uint32)  {}
