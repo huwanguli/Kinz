@@ -1,12 +1,19 @@
 package kiface
 
-// IMessage 将data封装到一个IMassage
+// IMessage is a single protocol message (payload container).
 type IMessage interface {
-	GetMsgId() uint32   // 获取消息 ID
-	GetDataLen() uint32 // 获取消息长度
-	GetData() []byte    // 获取消息内容
-	GetRawData() []byte //获取原始数据
-	SetMsgId(uint32)    // 设置消息 ID
-	SetData([]byte)     // 设置消息内容
-	SetDataLen(uint32)  // 设置消息长度
+	// GetMsgID returns the message id.
+	GetMsgID() uint32
+	// GetDataLen returns the payload length in bytes.
+	GetDataLen() uint32
+	// GetData returns the payload.
+	GetData() []byte
+	// GetRawData returns the raw bytes seen by the decoder (header when unpacked).
+	GetRawData() []byte
+	// SetMsgID sets the message id.
+	SetMsgID(uint32)
+	// SetData sets the payload.
+	SetData([]byte)
+	// SetDataLen sets the payload length.
+	SetDataLen(uint32)
 }

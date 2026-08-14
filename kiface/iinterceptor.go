@@ -1,20 +1,25 @@
 package kiface
 
-// IcReq 拦截器输入数据
+// IcReq is the interceptor-chain input (any value).
 type IcReq interface{}
 
-// IcResp 拦截器输出数据
+// IcResp is the interceptor-chain output (any value).
 type IcResp interface{}
 
+// IInterceptor is one step of the request pipeline (responsibility chain).
 type IInterceptor interface {
-	Intercept(IChain) IcResp
-	// 可自定义
+	// Intercept processes the chain request; call chain.Proceed to continue.
+	Intercept(chain IChain) IcResp
 }
 
-// IChain 责任链
+// IChain is the responsibility chain over interceptors.
 type IChain interface {
-	Request() IcReq        // 获取当前责任链中的请求数据
-	GetIMessage() IMessage // 获取 IMessage 数据
-	Proceed(IcReq) IcResp  // 进入并执行下一个拦截器，且将数据传输给下一个拦截器
-	ProceedWithIMessage(IMessage, IcReq) IcResp
+	// Request returns the current request payload.
+	Request() IcReq
+	// GetIMessage returns the IMessage inside the current request, if any.
+	GetIMessage() IMessage
+	// Proceed advances to the next interceptor with req.
+	Proceed(req IcReq) IcResp
+	// ProceedWithIMessage replaces the message and advances.
+	ProceedWithIMessage(iMessage IMessage, response IcReq) IcResp
 }

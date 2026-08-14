@@ -2,15 +2,18 @@ package kiface
 
 import "encoding/binary"
 
-type IFrameDecoder interface {
-	Decode(buff []byte) [][]byte
-}
-
+// LengthField describes how to locate the frame length in a byte stream.
 type LengthField struct {
-	Order               binary.ByteOrder //大小端
-	MaxFrameLength      uint64           // 最大帧长度
-	LengthFieldOffset   int              // 长度字段偏移量
-	LengthFieldLength   int              // 长度域字段的字节数
-	LengthAdjustment    int              // 长度调整
-	InitialBytesToStrip int              //需要跳过的字节数
+	// Order is the byte order of the length field (default big-endian).
+	Order binary.ByteOrder
+	// MaxFrameLength caps a single frame; larger frames are treated as errors.
+	MaxFrameLength uint64
+	// LengthFieldOffset is the offset of the length field in the frame.
+	LengthFieldOffset int
+	// LengthFieldLength is the byte width of the length field (1/2/3/4/8).
+	LengthFieldLength int
+	// LengthAdjustment is added to the length-field value.
+	LengthAdjustment int
+	// InitialBytesToStrip is how many leading bytes to drop from each frame.
+	InitialBytesToStrip int
 }

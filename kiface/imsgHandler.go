@@ -1,23 +1,30 @@
 package kiface
 
-// 消息管理抽象层
+import "context"
 
+// IMsgHandle dispatches requests to routers and runs the worker pool.
 type IMsgHandle interface {
-	// AddRouter DoMsgHandler 调度/执行对应的 Router 消息处理方法 TODEL:不在这里进行调用
-	// DoMsgHandler(request IRequest)
+	// AddRouter registers a classic router for msgID.
+	// Returns ErrMsgIDRegistered when msgID is already registered.
+	AddRouter(msgID uint32, router IRouter) error
+	// AddRouterSlices registers function-style handlers for msgID.
+	AddRouterSlices(msgID uint32, handlers ...RouterHandler) (IRouterSlices, error)
+	// Group scopes handlers to every msgID in [start, end].
+	Group(start, end uint32, handlers ...RouterHandler) (IGroupRouterSlices, error)
+	// Use registers global middleware applied to every message.
+	Use(handlers ...RouterHandler) (IRouterSlices, error)
 
-	// AddRouter 添加路由器
-	AddRouter(msgId uint32, router IRouter)
-
-	// AddRouterSlices 新版路由方法
-	AddRouterSlices(msgId uint32, handler ...RouterHandler) IRouterSlices
-	Group(start, end uint32, Handlers ...RouterHandler) IGroupRouterSlices
-	Use(Handler ...RouterHandler) IRouterSlices
-	// StartWorkerPool 启动 Worker 工作池
+	// StartWorkerPool launches the worker goroutines (idempotent).
 	StartWorkerPool()
-	// SendMsgToTaskQueue 将对应的消息交给对应的 Worker 进行业务处理
+	// StopWorkerPool drains and stops the workers, bounded by ctx.
+	StopWorkerPool(ctx context.Context)
+	// SendMsgToTaskQueue routes a request to a worker by ConnID.
 	SendMsgToTaskQueue(request IRequest)
-	Execute(request IRequest) //执行责任链上的拦截器方法
+	// Execute runs the interceptor chain, then dispatches to the handler.
+	Execute(request IRequest)
+
+	// AddInterceptor appends an interceptor to the chain.
 	AddInterceptor(interceptor IInterceptor)
+	// SetHeadInterceptor prepends an interceptor to the chain.
 	SetHeadInterceptor(interceptor IInterceptor)
 }

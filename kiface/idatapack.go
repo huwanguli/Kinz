@@ -1,19 +1,12 @@
 package kiface
 
-// IDataPack 解决TCP粘包问题的封包拆包模块(TLV)
+// IDataPack packs and unpacks messages in a TLV wire format.
 type IDataPack interface {
-	GetHeadLen() uint32                // 获取包头长度方法
-	Pack(msg IMessage) ([]byte, error) // 封包
-	Unpack([]byte) (IMessage, error)   // 拆包
+	// GetHeadLen returns the header length in bytes.
+	GetHeadLen() uint32
+	// Pack serializes msg into wire-format bytes.
+	Pack(msg IMessage) ([]byte, error)
+	// Unpack parses the header from binaryData and returns a message with the
+	// id and data length set; the payload must be read separately.
+	Unpack(binaryData []byte) (IMessage, error)
 }
-
-const (
-	// ZinxDataPack 大端序
-	ZinxDataPack string = "zinx_pack_tlv_big_endian"
-	// ZinxDataPackOld 小端序
-	ZinxDataPackOld string = "zinx_pack_tlv_little_endian"
-)
-
-const (
-	ZinxMessage string = "zinx_message"
-)

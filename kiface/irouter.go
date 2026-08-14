@@ -1,35 +1,36 @@
 package kiface
 
-// IRouter 路由的抽象接口
-// 路由里的数据都是Request
-
+// IRouter is the classic three-stage router. Embed BaseRouter in
+// implementations and override only the methods you need.
 type IRouter interface {
-	// PreHandle 处理conn业务之前的方法
+	// PreHandle runs before Handle.
 	PreHandle(request IRequest)
-	// Handle 处理Conn业务的主方法
+	// Handle runs the main business logic.
 	Handle(request IRequest)
-	// PostHandle 处理Conn业务之后的方法
+	// PostHandle runs after Handle.
 	PostHandle(request IRequest)
 }
 
-//After: 新版路由方式
-
+// RouterHandler is a function-style message handler.
 type RouterHandler func(request IRequest)
+
+// IRouterSlices is the function-style router with middleware support.
 type IRouterSlices interface {
-	// Use 添加全局组件
-	Use(Handler ...RouterHandler)
-
-	// AddHandler 添加业务处理器集合
-	AddHandler(magId uint32, handler ...RouterHandler)
-
-	// Group 路由群组管理
-	Group(start, end uint32, Handler ...RouterHandler) IGroupRouterSlices
-
-	// GetHandlers 获得当前的所有注册在MsgId的处理器集合
-	GetHandlers(MsgId uint32) ([]RouterHandler, bool)
+	// Use appends global middleware handlers and returns the router for chaining.
+	Use(handlers ...RouterHandler) IRouterSlices
+	// AddHandler registers handlers for msgID.
+	// Returns ErrMsgIDRegistered when msgID is already registered.
+	AddHandler(msgID uint32, handlers ...RouterHandler) error
+	// Group scopes handlers to every msgID in [start, end].
+	Group(start, end uint32, handlers ...RouterHandler) IGroupRouterSlices
+	// GetHandlers returns the handlers registered for msgID.
+	GetHandlers(msgID uint32) ([]RouterHandler, bool)
 }
 
+// IGroupRouterSlices is a router scoped to a msgID range.
 type IGroupRouterSlices interface {
-	Use(Handler ...RouterHandler)
-	AddHandler(MsgId uint32, handler ...RouterHandler)
+	// Use appends middleware scoped to the group.
+	Use(handlers ...RouterHandler) IGroupRouterSlices
+	// AddHandler registers handlers for a msgID inside the group range.
+	AddHandler(msgID uint32, handlers ...RouterHandler) error
 }

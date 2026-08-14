@@ -1,92 +1,57 @@
 package kiface
 
-type HandleStep int
-
-// IFuncRequest 函数消息接口
-type IFuncRequest interface {
-	CallFunc()
-}
-
-// IRequest 将客户端请求的链接信息和请求数据绑定在一起
+// IRequest binds a connection and a message, and carries per-request state
+// through the router chain (middleware support: Call/Abort, context Set/Get).
 type IRequest interface {
-	// GetConnection 得到当前链接数据
+	// GetConnection returns the connection that produced this request.
 	GetConnection() IConnection
-
-	// GetData 得到当前数据
+	// GetData returns the message payload.
 	GetData() []byte
-
-	// GetMsgID 得到当前请求消息的ID
+	// GetMsgID returns the message id.
 	GetMsgID() uint32
+	// GetMessage returns the underlying message.
+	GetMessage() IMessage
+	// GetResponse returns the interceptor-chain response (nil when none).
+	GetResponse() IcResp
+	// SetResponse stores the interceptor-chain response.
+	SetResponse(IcResp)
 
-	GetMessage() IMessage //获取请求消息的原始数据
+	// BindRouter binds the classic router that handles this request.
+	BindRouter(IRouter)
+	// Call invokes the bound classic router (PreHandle/Handle/PostHandle).
+	Call()
+	// Abort stops the remaining function-style handlers; the current one finishes.
+	Abort()
 
-	GetResponse() IcResp // 获取解析完后序列化数据
-
-	SetResponse(IcResp) // 设置解析完后序列化数据
-
-	BindRouter(router IRouter) // 绑定这次请求由哪个路由处理
-
-	Call() // 转进到下一个处理器执行
-
-	Abort() // 终止处理函数的运行，但调用该方法的函数会处理完毕
-
-	// Goto TODO : 暂时不实现 指定接下来的Handle去执行哪个函数
-	Goto()
-
+	// BindRouterSlices binds the function-style handler chain.
 	BindRouterSlices([]RouterHandler)
+	// RouterSlicesNext advances to the next function-style handler.
+	RouterSlicesNext()
 
-	RouterSlicesNext() // 执行下一个函数
-
+	// Copy returns a shallow copy of the request (worker-pool reuse).
 	Copy() IRequest
-	// Set 在Request中存放一个上下文
+	// Set stores a value in the request context.
 	Set(key string, value interface{})
+	// Get reads a value from the request context.
 	Get(key string) (interface{}, bool)
 }
 
+// BaseRequest is a no-op base for custom IRequest implementations.
 type BaseRequest struct{}
 
-func (b BaseRequest) GetConnection() IConnection {
-	return nil
-}
-func (b BaseRequest) GetData() []byte {
-	return nil
-}
-func (b BaseRequest) GetMsgID() uint32 {
-	return 0
-}
-func (b BaseRequest) GetMessage() IMessage {
-	return nil
-}
-func (b BaseRequest) GetResponse() IcResp {
-	return nil
-}
-func (b BaseRequest) SetResponse(resp IcResp) {
-
-}
-func (b BaseRequest) BindRouter(router IRouter) {
-
-}
-func (b BaseRequest) Call() {
-
-}
-func (b BaseRequest) Abort() {
-
-}
-func (b BaseRequest) Goto() {
-
-}
-func (b BaseRequest) BindRouterSlices(handlers []RouterHandler) {
-
-}
-func (b BaseRequest) RouterSlicesNext() {
-
-}
-func (b BaseRequest) Copy() IRequest {
-	return nil
-}
-func (b BaseRequest) Set(key string, value interface{}) {
-
-}
+func (b BaseRequest) GetConnection() IConnection        { return nil }
+func (b BaseRequest) GetData() []byte                   { return nil }
+func (b BaseRequest) GetMsgID() uint32                  { return 0 }
+func (b BaseRequest) GetMessage() IMessage              { return nil }
+func (b BaseRequest) GetResponse() IcResp               { return nil }
+func (b BaseRequest) SetResponse(IcResp)                {}
+func (b BaseRequest) BindRouter(IRouter)                {}
+func (b BaseRequest) Call()                             {}
+func (b BaseRequest) Abort()                            {}
+func (b BaseRequest) BindRouterSlices([]RouterHandler)  {}
+func (b BaseRequest) RouterSlicesNext()                 {}
+func (b BaseRequest) Copy() IRequest                    { return nil }
+func (b BaseRequest) Set(key string, value interface{}) {}
 func (b BaseRequest) Get(key string) (interface{}, bool) {
 	return nil, false
 }

@@ -1,30 +1,38 @@
 package kiface
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
+// IConnection wraps a single TCP connection with a reader and a writer
+// goroutine, liveness tracking, and key-value properties.
 type IConnection interface {
-	// Start 启动链接
+	// Start begins the read and write goroutines of this connection.
 	Start()
-
-	// Stop 停止链接
+	// Stop gracefully closes the connection. It is idempotent and safe to
+	// call from multiple goroutines.
 	Stop()
-
-	// GetTCPConnection 获取当前链接绑定的socket conn
-	GetTCPConnection() *net.TCPConn
-
-	// GetConnID 获取当前链接的ID
-	GetConnID() uint32
-
-	// GetRemoteAddr 获取远程的TCP状态 IP Port
+	// GetConn returns the underlying TCP connection.
+	GetConn() *net.TCPConn
+	// GetConnID returns the connection id (monotonically increasing).
+	GetConnID() uint64
+	// GetRemoteAddr returns the remote peer address.
 	GetRemoteAddr() net.Addr
+	// LocalAddr returns the local address of the connection.
+	LocalAddr() net.Addr
+	// SendMsg packs msgID/data with the server packet format and queues it for
+	// writing. It returns ErrConnClosed when the connection is closed.
+	SendMsg(msgID uint32, data []byte) error
+	// IsAlive reports whether any message was received within timeout.
+	IsAlive(timeout time.Duration) bool
+	// SetHeartBeat binds a heartbeat checker to this connection.
+	SetHeartBeat(hb IHeartbeatChecker)
 
-	// SendMsg 发送数据， 将数据发送给远程的客户端
-	SendMsg(msgId uint32, data []byte) error
-
+	// SetProperty attaches a key-value property to the connection.
 	SetProperty(key string, value interface{})
+	// GetProperty returns the value for key, or an error when absent.
 	GetProperty(key string) (interface{}, error)
+	// RemoveProperty deletes the property for key.
 	RemoveProperty(key string)
 }
-
-// HandleFunc 定义一个处理链接业务的方法
-type HandleFunc func(*net.TCPConn, []byte, int) error
