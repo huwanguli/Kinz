@@ -230,10 +230,6 @@ examples/      可运行示例（echo / chatroom / auth-middleware / mcp-stdio�
 docs/          文档全套
 ```
 
-## 📄 License
-
-尚未指定。公开仓库前请补充 LICENSE 文件并更新此处。
-
 ---
 
 *Kinz 由教学框架 [zinx](https://github.com/aceld/zinx) 重构而来（原 demo 与 mmo_game_zinx 已归档于 git 历史，可回溯）。AGENT.md 为本仓库的 AI 协作指南。*
