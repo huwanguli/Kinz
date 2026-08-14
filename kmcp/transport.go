@@ -2,6 +2,7 @@ package kmcp
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"os"
 
@@ -21,6 +22,12 @@ func (s *Server) ServeHTTP(addr string) error {
 
 // ServeStdio serves MCP over stdin/stdout (the Claude Desktop convention).
 func (s *Server) ServeStdio() error {
+	return s.serveStdio(os.Stdin, os.Stdout)
+}
+
+// serveStdio serves MCP over the given reader/writer pair. It is the
+// testable seam behind ServeStdio.
+func (s *Server) serveStdio(in io.Reader, out io.Writer) error {
 	ss := server.NewStdioServer(s.mcpServer)
-	return ss.Listen(context.Background(), os.Stdin, os.Stdout)
+	return ss.Listen(context.Background(), in, out)
 }

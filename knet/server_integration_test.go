@@ -13,7 +13,7 @@ import (
 )
 
 // waitReady polls until the server is listening (Address() != nil).
-func waitReady(t *testing.T, srv kiface.IServer) {
+func waitReady(t testing.TB, srv kiface.IServer) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -26,7 +26,7 @@ func waitReady(t *testing.T, srv kiface.IServer) {
 }
 
 // startTestServer runs a server on an ephemeral port and waits until ready.
-func startTestServer(t *testing.T, cfg *kconf.Config) (kiface.IServer, context.CancelFunc) {
+func startTestServer(t testing.TB, cfg *kconf.Config) (kiface.IServer, context.CancelFunc) {
 	t.Helper()
 	srv := NewServer(WithConfig(cfg))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -56,7 +56,7 @@ func testConfig(overrides func(*kconf.Config)) *kconf.Config {
 }
 
 // dialTLV connects a raw TLV-speaking client.
-func dialTLV(t *testing.T, addr net.Addr) net.Conn {
+func dialTLV(t testing.TB, addr net.Addr) net.Conn {
 	t.Helper()
 	conn, err := net.Dial("tcp", addr.String())
 	if err != nil {
@@ -67,7 +67,7 @@ func dialTLV(t *testing.T, addr net.Addr) net.Conn {
 
 // readMsg reads one TLV message from conn (manual header parse; Decode is
 // stream-based and cannot read a single message off a socket).
-func readMsg(t *testing.T, conn net.Conn, codec *TLVPack) (uint32, []byte) {
+func readMsg(t testing.TB, conn net.Conn, codec *TLVPack) (uint32, []byte) {
 	t.Helper()
 	head := make([]byte, 8)
 	if _, err := io.ReadFull(conn, head); err != nil {

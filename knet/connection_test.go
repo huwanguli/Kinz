@@ -11,7 +11,7 @@ import (
 )
 
 // tcpPair opens a real TCP pair for connection tests.
-func tcpPair(t *testing.T) (client, server *net.TCPConn) {
+func tcpPair(t testing.TB) (client, server *net.TCPConn) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

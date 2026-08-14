@@ -2,14 +2,11 @@ package kmcp
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/mark3labs/mcp-go/server"
 )
 
 func TestServeStdio(t *testing.T) {
@@ -25,10 +22,8 @@ func TestServeStdio(t *testing.T) {
 	defer stdoutW.Close()
 
 	m, _ := newTestServer(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go func() {
-		_ = server.NewStdioServer(m.mcpServer).Listen(ctx, stdinR, stdoutW)
+		_ = m.serveStdio(stdinR, stdoutW)
 	}()
 
 	// send an initialize request over the stdin pipe
