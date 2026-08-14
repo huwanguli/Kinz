@@ -19,7 +19,7 @@ type mockConn struct {
 
 func (m *mockConn) Start()                  {}
 func (m *mockConn) Stop()                   { m.stopped.Store(true) }
-func (m *mockConn) GetConn() *net.TCPConn   { return nil }
+func (m *mockConn) GetConn() net.Conn        { return nil }
 func (m *mockConn) GetConnID() uint64       { return 0 }
 func (m *mockConn) GetRemoteAddr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
 func (m *mockConn) LocalAddr() net.Addr     { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }

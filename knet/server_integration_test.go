@@ -12,6 +12,19 @@ import (
 	"kinz/kiface"
 )
 
+// waitReady polls until the server is listening (Address() != nil).
+func waitReady(t *testing.T, srv kiface.IServer) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.Address() != nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("server did not become ready")
+}
+
 // startTestServer runs a server on an ephemeral port and waits until ready.
 func startTestServer(t *testing.T, cfg *kconf.Config) (kiface.IServer, context.CancelFunc) {
 	t.Helper()

@@ -13,8 +13,9 @@ type IConnection interface {
 	// Stop gracefully closes the connection. It is idempotent and safe to
 	// call from multiple goroutines.
 	Stop()
-	// GetConn returns the underlying TCP connection.
-	GetConn() *net.TCPConn
+	// GetConn returns the underlying connection (net.Conn; *net.TCPConn for
+	// plain TCP, *tls.Conn when TLS is enabled).
+	GetConn() net.Conn
 	// GetConnID returns the connection id (monotonically increasing).
 	GetConnID() uint64
 	// GetRemoteAddr returns the remote peer address.

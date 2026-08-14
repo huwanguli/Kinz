@@ -29,7 +29,7 @@ const (
 // properties. Stop is idempotent and safe from any goroutine.
 type Connection struct {
 	server kiface.IServer
-	conn   *net.TCPConn
+	conn   net.Conn
 	connID uint64
 	codec  kiface.ICodec
 	msgHdl kiface.IMsgHandle
@@ -48,10 +48,10 @@ type Connection struct {
 	propertyLock sync.RWMutex
 }
 
-// NewConnection wraps a TCP connection with the server's codec (a per-
-// connection clone) and the message handler. The caller registers it in the
-// ConnManager before calling Start.
-func NewConnection(server kiface.IServer, conn *net.TCPConn, connID uint64,
+// NewConnection wraps a net.Conn with the server's codec (a per-connection
+// clone) and the message handler. The caller registers it in the ConnManager
+// before calling Start.
+func NewConnection(server kiface.IServer, conn net.Conn, connID uint64,
 	codec kiface.ICodec, msgHdl kiface.IMsgHandle, cfg *kconf.Config) *Connection {
 	c := &Connection{
 		server:   server,
@@ -150,7 +150,7 @@ func (c *Connection) Stop() {
 }
 
 // GetConn implements kiface.IConnection.
-func (c *Connection) GetConn() *net.TCPConn { return c.conn }
+func (c *Connection) GetConn() net.Conn { return c.conn }
 
 // GetConnID implements kiface.IConnection.
 func (c *Connection) GetConnID() uint64 { return c.connID }

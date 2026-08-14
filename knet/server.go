@@ -2,6 +2,7 @@ package knet
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -33,6 +34,11 @@ func WithName(name string) Option {
 	return func(s *Server) { s.cfg.Name = name }
 }
 
+// WithTLS enables TLS for accepted connections with the given config.
+func WithTLS(cfg *tls.Config) Option {
+	return func(s *Server) { s.tlsConfig = cfg }
+}
+
 // Server implements kiface.IServer with convention-first production defaults:
 // heartbeat and max-conn rejection are wired by default, panic recovery and
 // graceful shutdown are built in.
@@ -42,6 +48,7 @@ type Server struct {
 	msgHandler kiface.IMsgHandle
 	codec      kiface.ICodec
 	hbTemplate kiface.IHeartbeatChecker
+	tlsConfig  *tls.Config
 
 	onConnStart func(kiface.IConnection)
 	onConnStop  func(kiface.IConnection)
@@ -84,6 +91,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.started = false
 		s.mu.Unlock()
 		return err
+	}
+	if s.tlsConfig != nil {
+		ln = tls.NewListener(ln, s.tlsConfig)
 	}
 	s.mu.Lock()
 	s.listener = ln
@@ -175,12 +185,7 @@ func (s *Server) acceptLoop(ln net.Listener) {
 }
 
 func (s *Server) handleConn(conn net.Conn) error {
-	tcpConn, ok := conn.(*net.TCPConn)
-	if !ok {
-		return errors.New("kinz: non-TCP connection")
-	}
-	c := NewConnection(s, tcpConn, s.connID.Add(1), s.codec.Clone(),
-		s.msgHandler, s.cfg)
+	c := NewConnection(s, conn, s.connID.Add(1), s.codec.Clone(), s.msgHandler, s.cfg)
 	if err := s.connMgr.Add(c); err != nil {
 		return err // ErrServerFull
 	}
