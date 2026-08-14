@@ -19,3 +19,42 @@ jobs:
         run: go vet ./...
       - name: Test (race + cover)
         run: go test -race -cover ./...
+      - name: Coverage gate (core packages >= 70%)
+        run: |
+          set -e
+          THRESHOLD=70.0
+          for pkg in ./knet/ ./kconf/ ./kmetrics/ ./klog/ ./kpool/; do
+            go test "$pkg" -coverprofile=/tmp/kinz-cov.out > /dev/null
+            line=$(go tool cover -func=/tmp/kinz-cov.out | tail -1)
+            pct=$(echo "$line" | awk '{gsub("%","",$3); print $3}')
+            echo "$pkg coverage: $pct%"
+            if awk -v p="$pct" -v t="$THRESHOLD" 'BEGIN { exit !(p < t) }'; then
+              echo "::error::coverage gate failed: $pkg is $pct%, required >= $THRESHOLD%"
+              exit 1
+            fi
+          done
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Fuzz smoke (10s per target)
+        run: |
+          go test ./knet/ -run '^$' -fuzz=FuzzTLVPackDecode -fuzztime=10s
+          go test ./klog/ -run '^$' -fuzz=FuzzRingBuffer -fuzztime=10s
+          go test ./kconf/ -run '^$' -fuzz=FuzzLoadYAML -fuzztime=10s
+
+  bench-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Benchmark smoke (1x each, verify benches execute)
+        run: |
+          go test ./knet/ ./kpool/ ./klog/ ./kconf/ ./kmetrics/ -run '^$' -bench . -benchtime=1x
+          go test ./knet/ -run '^$' -bench 'RawEchoBaseline|EchoThroughput|MultiConnEcho' -benchtime=1x
