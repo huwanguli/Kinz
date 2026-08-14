@@ -277,7 +277,7 @@ kinz/
 
 ### 6.14 文档与 AI 友好（P5）
 
-- **CLAUDE.md 重写**：架构总览、构建/测试命令、代码约定（接口先行、错误处理、命名、缓冲池使用规则）、目录导航、常见坑。
+- **AGENT.md 重写**（原 CLAUDE.md 改名，工具无关约定）：架构总览、构建/测试命令、代码约定（接口先行、错误处理、命名、缓冲池使用规则）、目录导航、常见坑。
 - **`docs/` 目录**：
   - `architecture.md`：包结构、数据流、生命周期图、约定与扩展点清单；
   - `protocol.md`：TLV 线协议与 LengthField 帧格式、字节序、示例报文；
@@ -330,7 +330,7 @@ kinz/
 - 退出标准：任意 MCP 客户端（或手写最小客户端）能完成握手、列出工具、读取连接/指标、向连接发消息、广播、关连接、触发停机。
 
 ### Phase 5 — 文档与 AI 友好（P5）
-- 内容：CLAUDE.md 重写、`docs/` 全套、导出符号英文注释补齐、examples/（ping/chatroom/auth-middleware/mcp-stdio）。
+- 内容：AGENT.md 重写、`docs/` 全套、导出符号英文注释补齐、examples/（ping/chatroom/auth-middleware/mcp-stdio）。
 - 新增测试：examples 作为冒烟测试纳入 CI（build + 启动 + 退出）。
 - 退出标准：文档与代码一致；示例可运行并被 CI 构建；注释规范抽查通过。
 
@@ -373,6 +373,6 @@ kinz/
 2. 心跳、满连接拒绝、优雅停机、TLS、Client 重连均有集成测试覆盖；模糊与基准测试可用。
 3. 每个阶段的新功能与其测试同批交付（git 提交可追溯）。
 4. MCP Server 可被标准 MCP 客户端接入并完成监控/操控演示。
-5. `docs/` 与 CLAUDE.md 完整且与代码一致；导出符号有英文注释；examples/ 可运行。
+5. `docs/` 与 AGENT.md 完整且与代码一致；导出符号有英文注释；examples/ 可运行。
 6. 框架内无 `panic("implement me")`、无裸 `panic` 表达协议错误、无 `fmt.Printf` 日志残留。
 7. 包名与命名统一为 `kinz/kiface/knet/klog/kconf/kmetrics/kmcp`；`utils`、原 demo、原 mmo_game_zinx 已归档删除。

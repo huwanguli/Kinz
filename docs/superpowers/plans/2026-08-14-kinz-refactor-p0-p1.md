@@ -42,7 +42,7 @@
 | `kinterceptor/interface_test.go` | 编译期接口断言 | 新建（P1） |
 | `klog/ilog.go`、`klog/log.go` | `ILogger` 接口 + `log/slog` 实现（级别/格式/输出可配，无硬编码颜色） | 重写（P1，用户要求提前） |
 | `klog/log_test.go` | slog 级别过滤/JSON/With/InfoF 兼容测试 | 新建（P1） |
-| `CLAUDE.md` | 构建命令同步（完整重写在 P5） | 小改（P1 Task 5） |
+| `AGENT.md`（原 CLAUDE.md 改名，工具无关） | 改名 + 按新结构同步命令（完整重写在 P5） | 新建（P1 Task 6） |
 
 ---
 
@@ -1880,14 +1880,14 @@ git commit -m "feat(knet): add phase-2 stub implementations and compile-time int
 
 ---
 
-## Task 6: 全量验证 + CLAUDE.md 同步
+## Task 6: 全量验证 + AGENT.md（改名同步）
 
 **Files:**
-- Modify: `CLAUDE.md`（仅构建命令同步；完整重写在 P5）
+- Create: `AGENT.md`（原 `CLAUDE.md` 改名并同步新结构；完整重写在 P5）
 
-- [ ] **Step 1: 同步 CLAUDE.md 命令**
+- [ ] **Step 1: 创建 AGENT.md**
 
-将 CLAUDE.md 中 `go test ./znet/...`、`go test ./mmo_game_zinx/core/...` 等命令更新为当前可用的：
+将 `CLAUDE.md` 改名为 `AGENT.md`（工具无关约定，Claude/Copilot/Gemini 通用），内容按新结构重写：模块 `kinz`、包 `kiface/knet/klog/kinterceptor`、当前 P1 状态说明、构建/测试/覆盖率命令、代码约定（接口先行/哨兵错误/字节序显式声明/klog 日志/测试随功能同批提交）、`-race` 需要 C 工具链的环境说明。
 
 ```bash
 # Build
@@ -1895,10 +1895,8 @@ go build ./...
 
 # Tests
 go test ./knet/...
-go test ./kinterceptor/...
+go test ./klog/...
 ```
-
-（保留 go build 与 datapack 测试说明；删除 mmo 相关行。）
 
 - [ ] **Step 2: 最终验证矩阵**
 
@@ -1920,8 +1918,8 @@ Expected:
 - [ ] **Step 3: 提交**
 
 ```bash
-git add CLAUDE.md
-git commit -m "docs: sync CLAUDE.md build commands after kinz rename"
+git add AGENT.md
+git commit -m "docs: rename CLAUDE.md to AGENT.md, sync build commands after kinz rename"
 ```
 
 ---
@@ -1946,7 +1944,7 @@ git commit -m "docs: sync CLAUDE.md build commands after kinz rename"
 - **P2 核心实现重写**（退出标准见设计文档 §7）：Server 生命周期（Run/Shutdown/Serve+信号）、Connection 状态机/缓冲写/IsAlive/缓冲池化、消息管线（bufio+Decoder 错误化+拦截器接入）、MsgHandler（RouterSlices/中间件/工作池优雅关闭/panic 恢复）、心跳接通、满连接拒绝、Request 完整实现、kconf（YAML）加载链；新增对应单元/集成测试。
 - **P3 生产化**：klog 重写（slog+环形缓冲）、指标 kmetrics+Prometheus、TLS、Client 重写、哨兵错误落地；新增测试。
 - **P4 MCP**：kmcp 包（协议/传输/工具/资源）、AttachMCP、鉴权回调；新增测试。
-- **P5 文档与 AI 友好**：CLAUDE.md 重写、docs/ 全套、examples/（ping/chatroom/auth-middleware/mcp-stdio）、英文注释补齐。
+- **P5 文档与 AI 友好**：AGENT.md 重写、docs/ 全套、examples/（ping/chatroom/auth-middleware/mcp-stdio）、英文注释补齐。
 - **P6 测试补强 + 发布**：模糊/基准测试、覆盖率门禁（核心 ≥ 70%）、CHANGELOG、v1.0.0。
 
 > P7 `kinzctl`（发布后可选）见设计文档 §7，本次不实现。
