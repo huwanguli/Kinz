@@ -43,8 +43,7 @@ func tcpPair(t *testing.T) (client, server *net.TCPConn) {
 }
 
 func newTestConnection(srv kiface.IServer, conn *net.TCPConn) *Connection {
-	return NewConnection(srv, conn, 1, NewDataPack(), defaultDecoder(kconf.Default()),
-		NewMsgHandler(0, 0), kconf.Default())
+	return NewConnection(srv, conn, 1, NewTLVPack(), NewMsgHandler(0, 0), kconf.Default())
 }
 
 func TestConnectionProperty(t *testing.T) {

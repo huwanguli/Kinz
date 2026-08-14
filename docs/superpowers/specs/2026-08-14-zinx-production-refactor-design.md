@@ -43,7 +43,7 @@
 
 | 扩展点 | 接口 | 默认实现 |
 |--------|------|----------|
-| 编解码 | `IDecoder` / `IDataPack` | LengthField 帧解码器 + TLV（小端） |
+| 编解码 | `ICodec`（Decode/Pack/Clone 一体） | `knet.TLVPack`（小端 TLV，内部处理粘包/半包） |
 | 中间件 | `IInterceptor`（责任链） | 空链（可插入鉴权/加解密/限流） |
 | 路由 | `IRouter` / `IRouterSlices` | 经典三段式 + 函数式中间件链 |
 | 日志 | `ILogger` | slog 封装 |
@@ -105,7 +105,7 @@
 kinz/
 ├── kiface/        接口层（约定 + seam 的契约）
 ├── knet/          实现层（Server/Connection/MsgHandler/HeartBeat/ConnManager/Client）
-├── kinterceptor/  FrameDecoder（LengthField 帧解码，错误返回而非 panic）+ Chain
+├── kinterceptor/  Chain（拦截器责任链）
 ├── klog/          ILogger 接口 + slog 实现（含环形缓冲日志后端）
 ├── kconf/         Config + 默认值/YAML/env/Option 加载链
 ├── kmetrics/      指标注册表（原子计数/直方图）
@@ -125,7 +125,7 @@ kinz/
 │  Server（生命周期 Run/Shutdown，Option 配置）                            │
 │  ├─ Listener（TCP / TLS，Accept → 满连接拒绝 → NewConnection）           │
 │  ├─ Connection（读协程 + 写协程，原子状态机，IsAlive，缓冲池化）            │
-│  │    ├─ bufio.Reader（sync.Pool 池化）→ IDecoder → IInterceptor链        │
+│  │    ├─ ICodec（池化读缓冲，内部处理粘包/半包）→ IInterceptor链      │
 │  │    └─ msgChan(缓冲+超时) → Writer → socket                           │
 │  ├─ MsgHandler（RouterSlices/经典路由，Worker 池，panic 恢复）            │
 │  ├─ HeartBeatChecker（Server 配置 → 每连接 Clone，超时回调）              │
@@ -137,7 +137,7 @@ kinz/
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-数据流（读）：`socket → bufio.Reader（池化缓冲）→ IDecoder（帧重组，缓冲池化）→ IMessage → IInterceptor 链 → IRequest → MsgHandler（按 MsgID 分发）→ Worker 池或直启 goroutine → 业务 Router`。
+数据流（读）：`socket → 池化读缓冲 → ICodec.Decode（帧重组 + TLV 解析，payload 独立复制）→ IMessage → IInterceptor 链 → IRequest → MsgHandler（按 MsgID 分发）→ Worker 池或直启 goroutine → 业务 Router`。
 数据流（写）：`业务 → conn.SendMsg（封包，写缓冲池化）→ msgChan → Writer goroutine → socket`。
 
 ## 6. 详细设计
@@ -167,10 +167,10 @@ kinz/
 - **状态机**：`created → running → closing → closed`，用 `atomic.Uint32` + CAS 保证幂等 `Stop()`；channel 只关闭一次（`sync.Once`）。
 - **写路径**：`msgChan` 改为可配置缓冲（`WriteQueueSize`）；`SendMsg` 用
   `select { case msgChan <- data: ...; case <-done: ...; case <-time.After(WriteTimeout): ... }` 防止永久阻塞；Writer 退出后 SendMsg 返回 `ErrConnClosed`。
-- **读路径**：`bufio.Reader` + `IDecoder` 处理粘包/半包；解码出的完整帧送入拦截器链。
+- **读路径**：直接 `conn.Read` 读入 **kpool 池化缓冲**，交给 `ICodec.Decode` 处理粘包/半包（不需要 bufio——codec 自带帧重组缓冲，少一层分配）。
 - **读缓冲池化（sync.Pool）**：
   - 新增独立小包 **`kpool`**（导出 `BufferPool`，便于单测）：按 **4K/16K/64K** 三个尺寸分类的 `sync.Pool`；`Get(size)` 返回不小于请求尺寸的缓冲，`Put(buf)` 归还（校验尺寸档位，首尾字节写哨兵以便误用检测）。
-  - 应用点：① 每连接 `bufio.Reader` 的底层缓冲（连接创建时 Get、关闭时 Put）；② `FrameDecoder` 内部累积缓冲 `in`；③ 解码产物消息载荷 `data`；④ `Pack` 封包写缓冲。
+  - 应用点：① 每连接读缓冲（连接创建时 Get、关闭时 Put）；② `TLVPack` 内部累积缓冲；③ 解码产物消息载荷（codec 负责独立复制，见 §6.4）；④ `Pack` 封包写缓冲。
   - 归还时机：统一在连接关闭路径归还，保证池不泄漏；被拦截器/业务持久持有的缓冲**不池化**（文档注明，避免误用）。
   - 收益：高并发下避免每连接 4K 起步的分配/GC 压力；基准测试验证（见 §6.15）。
 - **存活跟踪**：`lastActivity` 原子时间戳，任何收到消息（不只心跳）都刷新；`IsAlive(timeout)` 基于此判断。
@@ -179,9 +179,13 @@ kinz/
 - **ConnID**：`uint64`。
 - 属性（SetProperty/GetProperty/RemoveProperty）保留，由 RWMutex 保护。
 
-### 6.4 消息管线（打通解码器 + 拦截器）
+### 6.4 消息管线（编解码 seam 合并）
 
-- 默认解码器：`kinterceptor.FrameDecoder`（LengthField 通用帧解码，支持大小端、1/2/3/4/8 字节长度域），**内部 `panic` 全部改为返回 error**；协议错误 → 关闭该连接 + 记日志 + 计数指标。
+- **编解码 seam 合并为一个 `ICodec`**（用户反馈：原 `IDecoder`（帧解码）与 `IDataPack`（消息解析）两个耦合接口冗余——DataLen 被解析两次、自定义协议要实现两个拼接口。合并后一个协议 = 一个 `ICodec` 实现）。
+  - `ICodec.Decode(buff []byte) ([]IMessage, error)`：消费原始字节流，返回完整消息；`(nil, nil)` 表示帧未完整；协议违规返回 error（`ErrTooLargePacket`/`ErrProtocol`）。
+  - `ICodec.Pack(msg) ([]byte, error)`：封包；`ICodec.Clone()`：每连接独立实例。
+  - **payload 契约**：Decode 返回的消息必须持有独立于 codec 内部缓冲的 payload（异步分发后不会被后续 Decode 覆写）——默认 `TLVPack` 在返回前复制。
+- 默认编解码器：`knet.TLVPack`（`[DataLen:4][MsgID:4][Data]`，默认小端，`NewTLVPackWithOrder` 可配大端；`MaxPacketSize` 超限返回 `ErrTooLargePacket`，连接关闭，fail-fast 安全姿态）。
 - 拦截器链：`IInterceptor` 责任链在 `MsgHandler.Execute(request)` 中执行，位于路由分发之前；`SetHeadInterceptor` 允许插入链头。
 - 工作池：保留"按 ConnID 取模分配 Worker 保证同连接有序"，增加：
   - 池大小与队列长度可配置（来自 kconf）；
@@ -226,7 +230,7 @@ kinz/
 
 - 哨兵错误：`ErrServerClosed`、`ErrConnClosed`、`ErrTooLargePacket`、`ErrServerFull`、`ErrProtocol`、`ErrTimeout`。
 - `MsgHandler` 执行 Router 时 `defer recover()`：记录堆栈、计数 `handler_panics`、不中断其他消息。
-- 读写 goroutine 与 Worker 同规则；`FrameDecoder` 不再 panic。
+- 读写 goroutine 与 Worker 同规则；`TLVPack` 不再 panic（协议错误一律返回 error）。
 - 所有 `panic("implement me")` 在 P1/P2 消灭。
 
 ### 6.10 指标（`kmetrics`，轻量可观测性）
@@ -280,7 +284,7 @@ kinz/
 - **AGENT.md 重写**（原 CLAUDE.md 改名，工具无关约定）：架构总览、构建/测试命令、代码约定（接口先行、错误处理、命名、缓冲池使用规则）、目录导航、常见坑。
 - **`docs/` 目录**：
   - `architecture.md`：包结构、数据流、生命周期图、约定与扩展点清单；
-  - `protocol.md`：TLV 线协议与 LengthField 帧格式、字节序、示例报文；
+  - `protocol.md`：TLV 线协议帧格式、字节序、示例报文；
   - `configuration.md`：kconf 全字段说明 + YAML/env 示例；
   - `getting-started.md`：快速开始（服务端/客户端最小示例）；
   - `mcp.md`：MCP Server 配置与使用；
@@ -297,7 +301,7 @@ kinz/
 
 - **单元测试**：kconf（加载链/缺文件不 panic/YAML 解析）、framedecoder（全分支）、buffer pool（尺寸分级/归还/哨兵）、connmanager、heartbeat（超时/存活/自定义回调）、router & slices（中间件顺序/Abort/Group）、request（上下文/Copy）、msgHandler（分发/panic 恢复）、connection 生命周期（`net.Pipe` 驱动读写）。
 - **集成测试**（真实 TCP loopback）：echo 往返、粘包半包重组、心跳超时断开、满连接拒绝（收到错误消息）、优雅停机（在途消息写完）、TLS 握手、Client 重连。
-- **模糊测试**：`FrameDecoder.Decode`（`go test -fuzz`）。
+- **模糊测试**：`TLVPack.Decode`（`go test -fuzz`）。
 - **基准测试**：Pack/Unpack、缓冲池命中率、单连接吞吐、多连接并发。
 - **CI**（GitHub Actions）：`go vet` + `go test -race ./...` + `golangci-lint` + 覆盖率门禁（核心包 ≥ 70%）+ 构建产物检查。本地配套 Makefile/Taskfile 命令。
 
@@ -350,7 +354,7 @@ kinz/
 
 ## 8. 兼容性与迁移
 
-- 保留默认 TLV（小端）线协议不变，保证老客户端可通信；`kiface` 中声明 `KinzDataPack`（大端）作为可选。
+- 保留默认 TLV（小端）线协议不变，保证老客户端可通信；`knet.NewTLVPackWithOrder` 支持大端作为可选。
 - API 破坏点明确列出：`NewServer` → `NewServer(opts...)`；`Serve()` → `Serve(ctx)`/`Run(ctx)`；`utils.GlobalObject` → `kconf`；`SendMsg` 返回错误语义不变。
 - 原 demo / mmo_game_zinx 删除归档（git 历史可回溯），**不迁移**；新示例在 P2/P5 逐步建立。
 - 命名映射：`zinx→kinz`、`ziface→kiface`、`znet→knet`、`zlog→klog`、`zinterceptor→kinterceptor`、`utils→kconf`（新增）、`zmcp→kmcp`（新增）。

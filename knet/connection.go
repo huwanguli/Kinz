@@ -28,13 +28,12 @@ const (
 // buffered write queue with timeout, liveness tracking, and key-value
 // properties. Stop is idempotent and safe from any goroutine.
 type Connection struct {
-	server  kiface.IServer
-	conn    *net.TCPConn
-	connID  uint64
-	packet  kiface.IDataPack
-	decoder kiface.IDecoder
-	msgHdl  kiface.IMsgHandle
-	cfg     *kconf.Config
+	server kiface.IServer
+	conn   *net.TCPConn
+	connID uint64
+	codec  kiface.ICodec
+	msgHdl kiface.IMsgHandle
+	cfg    *kconf.Config
 
 	msgChan      chan []byte
 	done         chan struct{}
@@ -49,18 +48,16 @@ type Connection struct {
 	propertyLock sync.RWMutex
 }
 
-// NewConnection wraps a TCP connection with the server's packet format,
-// a per-connection decoder clone, and the message handler. The caller
-// registers it in the ConnManager before calling Start.
+// NewConnection wraps a TCP connection with the server's codec (a per-
+// connection clone) and the message handler. The caller registers it in the
+// ConnManager before calling Start.
 func NewConnection(server kiface.IServer, conn *net.TCPConn, connID uint64,
-	packet kiface.IDataPack, decoder kiface.IDecoder, msgHdl kiface.IMsgHandle,
-	cfg *kconf.Config) *Connection {
+	codec kiface.ICodec, msgHdl kiface.IMsgHandle, cfg *kconf.Config) *Connection {
 	c := &Connection{
 		server:   server,
 		conn:     conn,
 		connID:   connID,
-		packet:   packet,
-		decoder:  decoder,
+		codec:    codec,
 		msgHdl:   msgHdl,
 		cfg:      cfg,
 		msgChan:  make(chan []byte, cfg.WriteQueueSize),
@@ -102,32 +99,15 @@ func (c *Connection) startReader() {
 			return
 		}
 		c.touch()
-		frames, derr := c.decoder.Decode(buf[:n])
+		msgs, derr := c.codec.Decode(buf[:n])
 		if derr != nil {
 			klog.L().Warn("decode error, closing connection", "connID", c.connID, "err", derr)
 			return
 		}
-		for _, frame := range frames {
-			if err := c.handleFrame(frame); err != nil {
-				return
-			}
+		for _, msg := range msgs {
+			c.msgHdl.SendMsgToTaskQueue(NewRequest(c, msg))
 		}
 	}
-}
-
-// handleFrame parses one complete frame into a message and dispatches it.
-func (c *Connection) handleFrame(frame []byte) error {
-	msg, err := c.packet.Unpack(frame)
-	if err != nil {
-		return err
-	}
-	headLen := c.packet.GetHeadLen()
-	if len(frame) < int(headLen) || uint32(len(frame)-int(headLen)) != msg.GetDataLen() {
-		return fmt.Errorf("%w: frame length mismatch", kiface.ErrProtocol)
-	}
-	msg.SetData(frame[headLen:])
-	c.msgHdl.SendMsgToTaskQueue(NewRequest(c, msg))
-	return nil
 }
 
 func (c *Connection) startWriter() {
@@ -187,7 +167,7 @@ func (c *Connection) SendMsg(msgID uint32, data []byte) error {
 	if c.state.Load() != stateRunning {
 		return kiface.ErrConnClosed
 	}
-	wire, err := c.packet.Pack(NewMessage(msgID, data))
+	wire, err := c.codec.Pack(NewMessage(msgID, data))
 	if err != nil {
 		return err
 	}

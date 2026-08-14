@@ -8,70 +8,82 @@ import (
 	"kinz/kiface"
 )
 
-// defaultMaxPacketSize caps a single packet payload when no config is set
-// (matches the historical default; Phase 2 wires it to kconf).
+// defaultMaxPacketSize caps a single packet payload when no config is set.
 const defaultMaxPacketSize uint32 = 4096
 
-// DataPack implements the default TLV wire format:
-// [DataLen:4][MsgID:4][Data:DataLen], in the configured byte order
-// (little-endian by default for wire compatibility with the legacy protocol).
-type DataPack struct {
+// TLVPack is the default ICodec: the TLV wire format
+// [DataLen:4][MsgID:4][Data:DataLen] in a configurable byte order
+// (little-endian by default). It is stateful (buffers partial frames for TCP
+// sticky/half packets); use Clone for a per-connection instance.
+type TLVPack struct {
 	order         binary.ByteOrder
 	maxPacketSize uint32
+	in            []byte
 }
 
-// NewDataPack returns a DataPack with little-endian order and the default
-// max packet size.
-func NewDataPack() *DataPack {
-	return NewDataPackWithOrder(binary.LittleEndian)
+// NewTLVPack returns a little-endian TLVPack with the default max packet size.
+func NewTLVPack() *TLVPack {
+	return NewTLVPackWithOrder(binary.LittleEndian, defaultMaxPacketSize)
 }
 
-// NewDataPackWithOrder returns a DataPack using the given byte order.
-// A nil order falls back to little-endian.
-func NewDataPackWithOrder(order binary.ByteOrder) *DataPack {
+// NewTLVPackWithOrder returns a TLVPack with the given byte order and max
+// packet size (maxPacketSize <= 0 means unlimited).
+func NewTLVPackWithOrder(order binary.ByteOrder, maxPacketSize uint32) *TLVPack {
 	if order == nil {
 		order = binary.LittleEndian
 	}
-	return &DataPack{order: order, maxPacketSize: defaultMaxPacketSize}
+	return &TLVPack{order: order, maxPacketSize: maxPacketSize}
 }
 
-// GetHeadLen returns the header length in bytes.
-func (dp *DataPack) GetHeadLen() uint32 { return 8 }
+// Decode implements kiface.ICodec: consumes raw stream bytes and returns
+// complete TLV messages. Returned payloads are independent of the codec's
+// internal buffer, so they stay valid for asynchronous processing.
+func (t *TLVPack) Decode(buff []byte) ([]kiface.IMessage, error) {
+	t.in = append(t.in, buff...)
+	var msgs []kiface.IMessage
+	for {
+		if len(t.in) < 8 {
+			return msgs, nil // header incomplete
+		}
+		dataLen := t.order.Uint32(t.in[0:4])
+		msgID := t.order.Uint32(t.in[4:8])
+		if t.maxPacketSize > 0 && dataLen > t.maxPacketSize {
+			return msgs, fmt.Errorf("%w: got %d bytes, max %d",
+				kiface.ErrTooLargePacket, dataLen, t.maxPacketSize)
+		}
+		total := 8 + int(dataLen)
+		if len(t.in) < total {
+			return msgs, nil // frame body incomplete (half packet)
+		}
+		msg := &Message{
+			Id:      msgID,
+			DataLen: dataLen,
+			// Copy payload: t.in will be overwritten by the next Decode.
+			Data: append([]byte(nil), t.in[8:total]...),
+			Raw:  append([]byte(nil), t.in[:8]...),
+		}
+		msgs = append(msgs, msg)
+		t.in = t.in[total:]
+	}
+}
 
-// Pack serializes msg into wire-format bytes.
-func (dp *DataPack) Pack(msg kiface.IMessage) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, dp.GetHeadLen()+msg.GetDataLen()))
-	if err := binary.Write(buf, dp.order, msg.GetDataLen()); err != nil {
+// Pack implements kiface.ICodec: serializes msg into TLV wire bytes.
+func (t *TLVPack) Pack(msg kiface.IMessage) ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 8+msg.GetDataLen()))
+	if err := binary.Write(buf, t.order, msg.GetDataLen()); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(buf, dp.order, msg.GetMsgID()); err != nil {
+	if err := binary.Write(buf, t.order, msg.GetMsgID()); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(buf, dp.order, msg.GetData()); err != nil {
+	if err := binary.Write(buf, t.order, msg.GetData()); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
-// Unpack parses the header and returns a Message with id/dataLen set;
-// the payload must be read separately (see Phase 2 pipeline).
-func (dp *DataPack) Unpack(binaryData []byte) (kiface.IMessage, error) {
-	if len(binaryData) < int(dp.GetHeadLen()) {
-		return nil, fmt.Errorf("%w: header needs %d bytes, got %d",
-			kiface.ErrProtocol, dp.GetHeadLen(), len(binaryData))
-	}
-	reader := bytes.NewReader(binaryData[:dp.GetHeadLen()])
-	msg := &Message{}
-	if err := binary.Read(reader, dp.order, &msg.DataLen); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(reader, dp.order, &msg.Id); err != nil {
-		return nil, err
-	}
-	if dp.maxPacketSize > 0 && msg.DataLen > dp.maxPacketSize {
-		return nil, fmt.Errorf("%w: got %d bytes, max %d",
-			kiface.ErrTooLargePacket, msg.DataLen, dp.maxPacketSize)
-	}
-	msg.Raw = append([]byte(nil), binaryData[:dp.GetHeadLen()]...)
-	return msg, nil
+// Clone implements kiface.ICodec: an independent codec with the same
+// configuration, ready to serve a new connection.
+func (t *TLVPack) Clone() kiface.ICodec {
+	return &TLVPack{order: t.order, maxPacketSize: t.maxPacketSize}
 }

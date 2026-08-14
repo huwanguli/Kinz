@@ -48,12 +48,10 @@ type IServer interface {
 	CallOnConnStart(conn IConnection)
 	CallOnConnStop(conn IConnection)
 
-	// SetPacket / GetPacket configure the wire-format pack implementation.
-	SetPacket(pack IDataPack)
-	GetPacket() IDataPack
-	// SetDecoder / GetDecoder configure the frame decoder (TCP sticky/half packets).
-	SetDecoder(decoder IDecoder)
-	GetDecoder() IDecoder
+	// SetCodec / GetCodec configure the wire codec (framing + serialization).
+	// The default is a little-endian TLV codec.
+	SetCodec(codec ICodec)
+	GetCodec() ICodec
 	// AddInterceptor appends a middleware interceptor to the request pipeline.
 	AddInterceptor(interceptor IInterceptor)
 	// GetMsgHandler returns the message dispatch module.

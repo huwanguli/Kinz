@@ -49,14 +49,11 @@ func (c *Client) GetOnConnStart() func(kiface.IConnection) { return nil }
 // GetOnConnStop implements kiface.IClient.
 func (c *Client) GetOnConnStop() func(kiface.IConnection) { return nil }
 
-// SetPacket implements kiface.IClient.
-func (c *Client) SetPacket(pack kiface.IDataPack) {}
+// SetCodec implements kiface.IClient.
+func (c *Client) SetCodec(codec kiface.ICodec) {}
 
-// GetPacket implements kiface.IClient.
-func (c *Client) GetPacket() kiface.IDataPack { return nil }
-
-// SetDecoder implements kiface.IClient. Phase 3.
-func (c *Client) SetDecoder(decoder kiface.IDecoder) {}
+// GetCodec implements kiface.IClient.
+func (c *Client) GetCodec() kiface.ICodec { return nil }
 
 // AddInterceptor implements kiface.IClient. Phase 3.
 func (c *Client) AddInterceptor(interceptor kiface.IInterceptor) {}

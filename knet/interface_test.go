@@ -11,6 +11,6 @@ var (
 	_ kiface.IConnManager      = (*ConnManager)(nil)
 	_ kiface.IHeartbeatChecker = (*HeartBeatChecker)(nil)
 	_ kiface.IClient           = (*Client)(nil)
-	_ kiface.IDataPack         = (*DataPack)(nil)
+	_ kiface.ICodec            = (*TLVPack)(nil)
 	_ kiface.IMessage          = (*Message)(nil)
 )

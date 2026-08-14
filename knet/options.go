@@ -2,14 +2,17 @@ package knet
 
 import "kinz/kiface"
 
+// ClientOption customizes a Client at construction time.
 type ClientOption func(c kiface.IClient)
 
-func WithPacketClient(pack kiface.IDataPack) ClientOption {
+// WithCodecClient sets the wire codec (framing + serialization).
+func WithCodecClient(codec kiface.ICodec) ClientOption {
 	return func(c kiface.IClient) {
-		c.SetPacket(pack)
+		c.SetCodec(codec)
 	}
 }
 
+// WithNameClient sets the client name.
 func WithNameClient(name string) ClientOption {
 	return func(c kiface.IClient) {
 		c.SetName(name)

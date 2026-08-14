@@ -12,7 +12,6 @@ import (
 
 	"kinz/kconf"
 	"kinz/kiface"
-	"kinz/kinterceptor"
 	"kinz/klog"
 )
 
@@ -41,8 +40,7 @@ type Server struct {
 	cfg        *kconf.Config
 	connMgr    kiface.IConnManager
 	msgHandler kiface.IMsgHandle
-	packet     kiface.IDataPack
-	decoder    kiface.IDecoder
+	codec      kiface.ICodec
 	hbTemplate kiface.IHeartbeatChecker
 
 	onConnStart func(kiface.IConnection)
@@ -63,21 +61,8 @@ func NewServer(opts ...Option) kiface.IServer {
 	}
 	s.connMgr = NewConnManager(s.cfg.MaxConn)
 	s.msgHandler = NewMsgHandler(s.cfg.WorkerPoolSize, s.cfg.MaxWorkerTaskLen)
-	s.packet = NewDataPack()
-	s.decoder = defaultDecoder(s.cfg)
+	s.codec = NewTLVPackWithOrder(binary.LittleEndian, s.cfg.MaxPacketSize)
 	return s
-}
-
-// defaultDecoder builds the TLV frame decoder: [DataLen:4][MsgID:4][Data].
-func defaultDecoder(cfg *kconf.Config) kiface.IDecoder {
-	return kinterceptor.NewFrameDecoder(kiface.LengthField{
-		Order:               binary.LittleEndian,
-		MaxFrameLength:      uint64(cfg.MaxPacketSize) + 8,
-		LengthFieldOffset:   0,
-		LengthFieldLength:   4,
-		LengthAdjustment:    4,
-		InitialBytesToStrip: 0,
-	})
 }
 
 // Run implements kiface.IServer: starts the listener and worker pool, blocks
@@ -194,7 +179,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 	if !ok {
 		return errors.New("kinz: non-TCP connection")
 	}
-	c := NewConnection(s, tcpConn, s.connID.Add(1), s.packet, s.decoder.Clone(),
+	c := NewConnection(s, tcpConn, s.connID.Add(1), s.codec.Clone(),
 		s.msgHandler, s.cfg)
 	if err := s.connMgr.Add(c); err != nil {
 		return err // ErrServerFull
@@ -208,7 +193,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 func (s *Server) rejectConn(conn net.Conn, cause error) error {
 	klog.L().Warn("connection rejected", "remote", conn.RemoteAddr().String(), "cause", cause)
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Duration(s.cfg.WriteTimeout)))
-	wire, err := s.packet.Pack(NewMessage(kiface.ServerFullMsgID, []byte(cause.Error())))
+	wire, err := s.codec.Pack(NewMessage(kiface.ServerFullMsgID, []byte(cause.Error())))
 	if err == nil {
 		_, _ = conn.Write(wire)
 	}
@@ -264,17 +249,11 @@ func (s *Server) CallOnConnStop(conn kiface.IConnection) {
 	}
 }
 
-// SetPacket implements kiface.IServer.
-func (s *Server) SetPacket(pack kiface.IDataPack) { s.packet = pack }
+// SetCodec implements kiface.IServer.
+func (s *Server) SetCodec(codec kiface.ICodec) { s.codec = codec }
 
-// GetPacket implements kiface.IServer.
-func (s *Server) GetPacket() kiface.IDataPack { return s.packet }
-
-// SetDecoder implements kiface.IServer.
-func (s *Server) SetDecoder(decoder kiface.IDecoder) { s.decoder = decoder }
-
-// GetDecoder implements kiface.IServer.
-func (s *Server) GetDecoder() kiface.IDecoder { return s.decoder }
+// GetCodec implements kiface.IServer.
+func (s *Server) GetCodec() kiface.ICodec { return s.codec }
 
 // AddInterceptor implements kiface.IServer.
 func (s *Server) AddInterceptor(interceptor kiface.IInterceptor) {

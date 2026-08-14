@@ -2,7 +2,7 @@
 // every ping (msgID 1) and enables heartbeat checking.
 //
 // Run: go run ./examples/ping
-// Then speak TLV with any client (e.g. use knet.DataPack in a test program).
+// Then speak TLV with any client (e.g. use knet.NewTLVPack in a test program).
 package main
 
 import (

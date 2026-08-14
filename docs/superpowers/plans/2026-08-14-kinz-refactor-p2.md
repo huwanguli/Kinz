@@ -10,14 +10,12 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 
 ## 关键设计决策（含对 P1 接口的修订，均需在 P2 落地）
 
+0. **P2 设计修订（用户反馈：codec 合并，覆盖原决策 1–4）**：`IDecoder`（帧解码）与 `IDataPack`（消息解析）两个耦合接口冗余（DataLen 解析两次、自定义协议需实现两个接口、且帧引用内部缓冲存在异步覆写的数据竞争）→ **合并为单一 `kiface.ICodec`**（`Decode(buff) ([]IMessage, error)` + `Pack` + `Clone`）。默认实现 `knet.TLVPack`（小端 TLV，内部缓冲处理粘包/半包，`Decode` 返回的消息 payload **独立复制**以修复数据竞争）；删除 `kinterceptor.FrameDecoder`、`kiface.LengthField`、`IDecoder`、`IDataPack`；`IServer`/`IClient` 的 `SetPacket/GetPacket/SetDecoder/GetDecoder` 统一为 `SetCodec/GetCodec`。`kinterceptor` 仅保留 Chain。
 1. **kiface 修订**（P2 接口修订，随 P2 提交）：
-   - `IDecoder.Decode(buff []byte) ([][]byte, error)`（错误化，替代无 error 版本）+ `IDecoder.Clone() IDecoder`（解码器有连接级状态，必须每连接克隆）
    - `IServer.Address() net.Addr`（Port=0 时测试/运维需要真实地址）
    - `HeartBeatOption.Timeout time.Duration`（超时判定，默认 3×interval）
    - 新增常量 `ServerFullMsgID uint32 = 0xFFFFFFFE`（满连接拒绝时发送的消息 ID）
-2. **FrameDecoder 简化重写**：去掉 discard 模式（超长帧 = 协议违规 → 返回 `ErrTooLargePacket`，连接关闭，fail-fast 安全姿态）；`getUnadjustedFrameLength` 改用 `binary.ByteOrder.Uint*`（更快）；`MaxFrameLength=0` 视为不限；1/2/3/4/8 字节长度域；负数/超长/非法长度域返回 error。
-3. **默认 TLV 解码器**：LengthField{Order: LittleEndian, MaxFrameLength: MaxPacketSize+8, Offset:0, Len:4, Adjustment:4, Strip:0} → 帧 = 完整 TLV 包；管线再做 `len(frame)==8+DataLen` 一致性校验（ErrProtocol）。
-4. **读路径**：不用 bufio，直接 `conn.Read` 读入 **kpool 池化缓冲**（每连接 Get(4096)，关闭时 Put）——同语义、少一层分配（对设计文档"bufio"的偏差，理由：解码器自带帧重组，bufio 冗余）。
+2. **读路径**：不用 bufio，直接 `conn.Read` 读入 **kpool 池化缓冲**（每连接 Get(4096)，关闭时 Put）——codec 自带帧重组，bufio 冗余。
 5. **kpool**：4K/16K/64K 三档 `sync.Pool`；`Get(size)` 返回 ≥size 档位缓冲，超 64K 直接分配；`Put` 校验档位，不匹配静默丢弃；Put 时首字节写哨兵 0xAA（误用检测）。
 6. **kconf**：`Config` 全字段 + `Duration` 自定义类型（YAML 支持 "10s" 字符串与纳秒整数）；加载链 默认→`conf/kinz.yaml`（缺失不 panic，非法报错）→`KINZ_*` 环境变量（非法报错）；`Load(path) (*Config, error)`。
 7. **Connection**：`stopOnce sync.Once` 幂等清理（hooks/hb 停止/socket 关闭/done 关闭/ConnMgr 移除），Reader 的 defer 只调 `stopOnce`（不等待自身），外部 `Stop()` = stopOnce + `wg.Wait`；`msgChan` 缓冲 `WriteQueueSize`（默认 256）**永不 close**，Writer 靠 done 退出；`SendMsg` 三路 select（msgChan/done/WriteTimeout）；`lastActivity` 原子时间戳，任何消息刷新，`IsAlive(timeout)` 判定。
@@ -33,7 +31,7 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 | T1 | go.mod + kiface 修订 | `go.mod`、`kiface/idecoder.go`、`kiface/iserver.go`、`kiface/iheartbeat.go`、`kiface/errors.go`(常量) | 编译期断言随 T5 更新 |
 | T2 | kconf | `kconf/config.go`、`kconf/config_test.go` | 默认/缺文件/YAML/非法 YAML/env 覆盖 |
 | T3 | kpool | `kpool/pool.go`、`kpool/pool_test.go` | 档位获取/复用/误尺寸丢弃/大缓冲直配 |
-| T4 | FrameDecoder 重写 | `kinterceptor/framedecoder.go`、`kinterceptor/framedecoder_test.go` | 单帧/半包/粘包/超长/负数/非法长度域 |
+| T4 | codec 合并：TLVPack(ICodec) + 删 FrameDecoder/LengthField | `kiface/icodec.go`、`knet/datapack.go`、`kinterceptor/` | 往返/半包/粘包/超长/大端/Clone/payload 独立 |
 | T5 | Request | `knet/request.go` | 上下文/Copy/Abort 语义（随 T6 测试） |
 | T6 | RouterSlices+MsgHandler | `knet/routerSlices.go`、`knet/msgHandler.go` | 重复注册/中间件顺序/Abort/Group 越界/panic 恢复 |
 | T7 | HeartBeatChecker | `knet/heartbeat.go` | 存活/超时回调/默认消息/Set 函数非 nil 判断 |

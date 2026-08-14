@@ -23,11 +23,9 @@ type IClient interface {
 	GetOnConnStart() func(IConnection)
 	GetOnConnStop() func(IConnection)
 
-	// SetPacket / GetPacket configure the wire-format pack implementation.
-	SetPacket(IDataPack)
-	GetPacket() IDataPack
-	// SetDecoder configures the frame decoder.
-	SetDecoder(IDecoder)
+	// SetCodec / GetCodec configure the wire codec (framing + serialization).
+	SetCodec(ICodec)
+	GetCodec() ICodec
 	// AddInterceptor appends a middleware interceptor.
 	AddInterceptor(IInterceptor)
 	// GetMsgHandler returns the message dispatch module.
