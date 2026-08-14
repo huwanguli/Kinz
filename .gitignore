@@ -9,6 +9,7 @@ bin/
 # legacy (deleted) references
 myDemo/
 
-
-# docs
+# 个人/内部文档（本地保留，不上传 GitHub）
 docs/INTERVIEW_GUIDE.md
+CHANGELOG.md
+docs/superpowers/plans/2026-08-14-baseline-build-errors.txt
