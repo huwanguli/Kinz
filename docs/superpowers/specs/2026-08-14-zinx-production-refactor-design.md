@@ -310,9 +310,9 @@ kinz/
 - 退出标准：CI 配置文件落地；构建失败清单与本文档 §3.1 一致。
 
 ### Phase 1 — 改名 + 接口重定义（P1）
-- 内容：`git rm demo/ mmo_game_zinx/`（删除归档）；module 改名 `kinz`，包改名 `kiface/knet/klog/kconf/kinterceptor`（`utils` 移除）；按新哲学重写全部接口（删除僵尸方法 `Inotify/IFuncRequest/HandleFunc` 等；明确 `IServer/IConnection/IRequest/IMessage/IMsgHandle/IConnManager/IClient` 语义与注释）；引入 `gopkg.in/yaml.v3`；旧实现以返回零值/`ErrNotImplemented` 的占位过渡；清理 `REPRO/TODEL` 注释。
-- 新增测试：包级冒烟（各包可编译、接口断言 `var _ kiface.IServer = (*knet.Server)(nil)` 等）。
-- 退出标准：`go build ./...` 绿；`kiface` 无僵尸方法；`knet` 无 `panic("implement me")`；所有接口有英文注释；接口断言测试通过。
+- 内容：`git rm demo/ mmo_game_zinx/`（删除归档）；module 改名 `kinz`，包改名 `kiface/knet/klog/kconf/kinterceptor`（`utils` 移除）；目录结构按 Go 库惯例整理（`INTERVIEW_GUIDE.md` 移入 `docs/`，`.idea/` 解除跟踪）；按新哲学重写全部接口（删除僵尸方法 `Inotify/IFuncRequest/HandleFunc` 等；明确 `IServer/IConnection/IRequest/IMessage/IMsgHandle/IConnManager/IClient` 语义与注释）；`klog` 以 `log/slog` 重写（级别/JSON/动态级别，用户要求提前）；`yaml.v3` 依赖随 `kconf` 在 P2 引入（空依赖会被 `go mod tidy` 清除，故不提前）；旧实现以返回零值/`ErrNotImplemented` 的占位过渡；清理 `REPRO/TODEL` 注释。
+- 新增测试：包级冒烟（各包可编译、接口断言 `var _ kiface.IServer = (*knet.Server)(nil)` 等）、`klog` slog 单测（级别过滤/JSON/With/InfoF 兼容）。
+- 退出标准：`go build ./...` 绿；`kiface` 无僵尸方法；`knet` 无 `panic("implement me")`；所有接口有英文注释；接口断言测试与 `klog` 测试通过。
 
 ### Phase 2 — 核心实现重写（P2）
 - 内容：`Server`（Run/Shutdown/Serve+信号）、`Connection`（状态机/缓冲写/存活/错误处理/缓冲池化）、消息管线（bufio+Decoder+拦截器接入）、`MsgHandler`（RouterSlices/中间件/工作池优雅关闭/panic 恢复）、心跳接通、满连接拒绝、`Request` 完整实现、kconf 加载链（YAML）。
@@ -320,7 +320,7 @@ kinz/
 - 退出标准：`examples/ping` 用新 API 跑通；上述新测试全绿（含 `-race`）；SIGTERM 优雅停机验证通过。
 
 ### Phase 3 — 生产化（P3）
-- 内容：klog 重写（slog + 环形缓冲）、全部日志迁移、哨兵错误、kmetrics + Prometheus 端点、TLS、Client 完整重写（重连/心跳/超时）。
+- 内容：日志环形缓冲后端（供 MCP `get_logs`，klog slog 重写已在 P1 完成）、全部日志迁移到 klog、哨兵错误、kmetrics + Prometheus 端点、TLS、Client 完整重写（重连/心跳/超时）。
 - 新增测试：日志级别/格式、指标计数、TLS 握手、Client 断线重连、错误哨兵断言。
 - 退出标准：日志结构化可查；panic 处理器不炸进程；指标可读；TLS 握手验证通过；Client 断线重连验证通过；新测试全绿。
 

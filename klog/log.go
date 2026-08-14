@@ -83,6 +83,7 @@ func L() ILogger { return defaultLogger }
 func SetDefault(l ILogger) { defaultLogger = l }
 
 // Package-level convenience delegates to L().
+
 func Debug(msg string, args ...any)     { L().Debug(msg, args...) }
 func Info(msg string, args ...any)      { L().Info(msg, args...) }
 func Warn(msg string, args ...any)      { L().Warn(msg, args...) }
