@@ -60,27 +60,44 @@ func main() {
 	fmt.Println("echo OK")
 }
 
-// readMsg reads the next non-heartbeat message from conn, buffering partial
-// frames inside codec across reads.
+// readMsg returns the next non-heartbeat message. It first drains messages
+// already buffered inside the codec (TCP may deliver several in one segment),
+// then reads from the socket only when the buffer is exhausted.
 func readMsg(conn net.Conn, codec *knet.TLVPack, timeout time.Duration) (kiface.IMessage, error) {
 	chunk := make([]byte, 4096)
 	for {
+		// Drain the codec's internal buffer first: Decode(nil) consumes no
+		// socket data and returns any complete frames already received.
+		msgs, derr := codec.Decode(nil)
+		if derr != nil {
+			return nil, derr
+		}
+		if m := firstNonHeartbeat(msgs); m != nil {
+			return m, nil
+		}
+		// Buffer exhausted: read more from the socket.
 		_ = conn.SetReadDeadline(time.Now().Add(timeout))
 		n, err := conn.Read(chunk)
 		if err != nil {
 			return nil, err
 		}
-		msgs, derr := codec.Decode(chunk[:n])
+		msgs, derr = codec.Decode(chunk[:n])
 		if derr != nil {
 			return nil, derr
 		}
-		for _, m := range msgs {
-			if m.GetMsgID() == kiface.HeartBeatDefaultMsgID {
-				continue // heartbeat frame from the server
-			}
+		if m := firstNonHeartbeat(msgs); m != nil {
 			return m, nil
 		}
 	}
+}
+
+func firstNonHeartbeat(msgs []kiface.IMessage) kiface.IMessage {
+	for _, m := range msgs {
+		if m.GetMsgID() != kiface.HeartBeatDefaultMsgID {
+			return m
+		}
+	}
+	return nil
 }
 
 func fatal(what string, err error) {

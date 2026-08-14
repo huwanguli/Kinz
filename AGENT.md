@@ -51,7 +51,7 @@ go test -race ./...
 
 - **Interface-first**: define the contract in `kiface` before implementing in `knet`.
 - **Convention-first**: default paths are production-safe (heartbeat, max-conn rejection, panic recovery, graceful shutdown); extension happens at seams (`ICodec`, `RouterHandler` middleware via `Use`/`Group`, `ILogger`, `IMetrics`).
-- **Middleware contract**: a function-style handler must call `req.RouterSlicesNext()` to continue the chain (gin-style); `req.Abort()` stops it.
+- **Middleware contract**: a handler must call `req.RouterSlicesNext()` to continue the chain (gin-style); `req.Abort()` stops the remaining handlers. The chain is **synchronous nesting (onion model)**: code written AFTER `req.RouterSlicesNext()` runs once the downstream handlers finish — use it for after-middleware (timing, recovery, response observability). `Abort()` still unwinds the stack, so upstream after-logic runs.
 - **Errors**: use sentinel errors from `kiface`, wrap with `%w`. No panics in library code paths.
 - **Byte order**: a wire-protocol decision — always explicit `binary.ByteOrder`, configurable (see `DataPack`/`NewDataPackWithOrder`); never probe host endianness.
 - **Logging**: use `klog` (slog). No `fmt.Printf` in framework code.

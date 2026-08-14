@@ -95,6 +95,59 @@ func TestGroupOutOfRange(t *testing.T) {
 	}
 }
 
+func TestMiddlewareBeforeAfter(t *testing.T) {
+	mh := NewMsgHandler(0, 0)
+	var order []string
+	mh.globalHandlers = append(mh.globalHandlers, func(req kiface.IRequest) {
+		order = append(order, "mw-before")
+		req.RouterSlicesNext()            // descend into the chain
+		order = append(order, "mw-after") // runs after the handler returns
+	})
+	if _, err := mh.AddRouterSlices(7, func(kiface.IRequest) {
+		order = append(order, "handler")
+	}); err != nil {
+		t.Fatalf("AddRouterSlices: %v", err)
+	}
+
+	mh.Execute(msgIDRequest(7))
+	want := []string{"mw-before", "handler", "mw-after"}
+	if len(order) != len(want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("order = %v, want %v", order, want)
+		}
+	}
+}
+
+func TestMiddlewareAfterRunsOnAbort(t *testing.T) {
+	mh := NewMsgHandler(0, 0)
+	var order []string
+	mh.globalHandlers = append(mh.globalHandlers, func(req kiface.IRequest) {
+		order = append(order, "mw-before")
+		req.RouterSlicesNext()
+		order = append(order, "mw-after") // must still run after an abort
+	})
+	if _, err := mh.AddRouterSlices(8, func(req kiface.IRequest) {
+		order = append(order, "handler")
+		req.Abort()
+	}); err != nil {
+		t.Fatalf("AddRouterSlices: %v", err)
+	}
+
+	mh.Execute(msgIDRequest(8))
+	want := []string{"mw-before", "handler", "mw-after"}
+	if len(order) != len(want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("order = %v, want %v", order, want)
+		}
+	}
+}
+
 func TestExecutePanicRecovery(t *testing.T) {
 	mh := NewMsgHandler(0, 0)
 	if _, err := mh.AddRouterSlices(5, func(kiface.IRequest) { panic("boom") }); err != nil {

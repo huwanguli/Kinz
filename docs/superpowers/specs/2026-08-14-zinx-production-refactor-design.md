@@ -197,6 +197,7 @@ kinz/
 - 完整实现 `IRouterSlices`：`Use`（全局中间件）、`Group(start, end, ...)`（区间分组中间件）、`AddHandler(msgID, ...)`、`GetHandlers`。
 - `Request` 完整实现 `IRequest`：`Abort`（终止后续处理器）、`RouterSlicesNext`（链式推进）、`Set/Get`（请求级上下文）、`Copy`、`SetMessage`（中间件替换消息）、`BindRouterSlices`。
 - **经典 `IRouter`/`BaseRouter` 已删除**（P2 设计修订：三段式与函数式 handler 重叠且被完全覆盖）——`AddRouterSlices` 注册业务，`Use`/`Group` 挂中间件，`RouterSlicesNext()` 续链、`Abort()` 终止。
+- **洋葱模型（before/after 中间件）**：链为同步嵌套调用，`RouterSlicesNext()` 之后的代码在业务处理完成后执行（after 中间件：计时、恢复、响应观测）；`Abort()` 只停后续 handler，栈照常展开，上游 after 逻辑仍执行。
 - 注册期校验：msgID 重复注册返回 error（不再 panic）。
 
 ### 6.6 心跳保活（接通主链路）

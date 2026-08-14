@@ -28,7 +28,7 @@ func main() {
 
 	s := knet.NewServer(knet.WithConfig(cfg))
 
-	// Global middleware: log every message, then continue the chain.
+	// Global middleware 1 (before-only): log every message, then continue.
 	if _, err := s.Use(func(req kiface.IRequest) {
 		klog.L().Info("message received",
 			"msgID", req.GetMsgID(),
@@ -36,6 +36,16 @@ func main() {
 		req.RouterSlicesNext()
 	}); err != nil {
 		fatal("use middleware", err)
+	}
+
+	// Global middleware 2 (before + after, onion model): time the whole chain.
+	// Code after RouterSlicesNext runs once the business handler returns.
+	if _, err := s.Use(func(req kiface.IRequest) {
+		start := time.Now()
+		req.RouterSlicesNext()
+		klog.L().Info("handled", "msgID", req.GetMsgID(), "elapsed", time.Since(start).String())
+	}); err != nil {
+		fatal("use timing middleware", err)
 	}
 
 	// Echo handler: ping (msgID 1) -> pong (msgID 2) with the same payload.
