@@ -35,7 +35,16 @@ go tool cover -func=coverage.out
 go test -race ./...
 ```
 
-> Note: `go test -race` requires CGO + a C toolchain (gcc/ld). It does **not** run on this dev machine (no compiler installed); use CI (ubuntu) or install mingw. All other commands run locally.
+> Note: `go test -race` requires CGO + a C toolchain (gcc/ld). This machine has gcc (QT mingw1310) but was missing `ld.exe`; a working local `-race` is possible with a one-line shim:
+>
+> ```powershell
+> New-Item -ItemType Directory -Force -Path "$env:TEMP\mingwbin" | Out-Null
+> Copy-Item "D:\QT\Tools\mingw1310_64\bin\ld.bfd.exe" "$env:TEMP\mingwbin\ld.exe" -Force
+> $env:PATH = "$env:TEMP\mingwbin;$env:PATH"
+> go test -race ./...          # now works locally; CI (ubuntu) still authoritative
+> ```
+>
+> The `$env:PATH` change is per-shell (each pwsh call is a fresh process).
 
 ## Current State (v1.0.0, end of P6)
 
