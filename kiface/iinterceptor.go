@@ -12,6 +12,12 @@ type IInterceptor interface {
 	Intercept(chain IChain) IcResp
 }
 
+// InterceptorFunc adapts a plain function to IInterceptor.
+type InterceptorFunc func(chain IChain) IcResp
+
+// Intercept implements IInterceptor.
+func (f InterceptorFunc) Intercept(chain IChain) IcResp { return f(chain) }
+
 // IChain is the responsibility chain over interceptors.
 type IChain interface {
 	// Request returns the current request payload.

@@ -38,21 +38,16 @@ func (c *Chain) Proceed(req kiface.IcReq) kiface.IcResp {
 }
 
 func (c *Chain) ProceedWithIMessage(iMessage kiface.IMessage, response kiface.IcReq) kiface.IcResp {
-	if iMessage == nil || response == nil {
-		return c.Proceed(c.Request())
-	}
-	req := c.Request()
-
-	if req == nil {
-		return c.Proceed(c.Request())
-	}
-
-	iRequest := c.ShouldIRequest(req)
+	iRequest := c.ShouldIRequest(c.Request())
 	if iRequest == nil {
 		return c.Proceed(c.Request())
 	}
-
-	iRequest.SetResponse(response)
+	if iMessage != nil {
+		iRequest.SetMessage(iMessage)
+	}
+	if response != nil {
+		iRequest.SetResponse(response)
+	}
 	return c.Proceed(iRequest)
 }
 

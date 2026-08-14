@@ -11,6 +11,8 @@ type IRequest interface {
 	GetMsgID() uint32
 	// GetMessage returns the underlying message.
 	GetMessage() IMessage
+	// SetMessage replaces the underlying message (interceptor rewrites).
+	SetMessage(IMessage)
 	// GetResponse returns the interceptor-chain response (nil when none).
 	GetResponse() IcResp
 	// SetResponse stores the interceptor-chain response.
@@ -43,6 +45,7 @@ func (b BaseRequest) GetConnection() IConnection        { return nil }
 func (b BaseRequest) GetData() []byte                   { return nil }
 func (b BaseRequest) GetMsgID() uint32                  { return 0 }
 func (b BaseRequest) GetMessage() IMessage              { return nil }
+func (b BaseRequest) SetMessage(IMessage)               {}
 func (b BaseRequest) GetResponse() IcResp               { return nil }
 func (b BaseRequest) SetResponse(IcResp)                {}
 func (b BaseRequest) BindRouter(IRouter)                {}
