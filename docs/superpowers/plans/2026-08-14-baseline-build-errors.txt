@@ -1,0 +1,12 @@
+# zinx/znet
+znet\server.go:39:16: undefined: ziface.IDataPackd
+znet\client.go:162:15: cannot use NewMsgHandler() (value of type *MsgHandler) as ziface.IMsgHandle value in struct literal: *MsgHandler does not implement ziface.IMsgHandle (missing method AddInterceptor)
+znet\client.go:168:7: cannot use c (variable of type *Client) as ziface.IClient value in argument to opt: *Client does not implement ziface.IClient (missing method AddInterceptor)
+znet\client.go:170:9: cannot use c (variable of type *Client) as ziface.IClient value in return statement: *Client does not implement ziface.IClient (missing method AddInterceptor)
+znet\connection.go:117:36: cannot use req (variable of type *Request) as ziface.IRequest value in argument to c.MsgHandler.SendMsgToTaskQueue: *Request does not implement ziface.IRequest (missing method Abort)
+znet\connection.go:120:20: c.MsgHandler.DoMsgHandler undefined (type ziface.IMsgHandle has no field or method DoMsgHandler)
+znet\connection.go:207:28: cannot use NewMessage(msgId, data) (value of type *Message) as ziface.IMessage value in argument to dp.Pack: *Message does not implement ziface.IMessage (missing method GetRawData)
+znet\datapack.go:69:9: cannot use msg (variable of type *Message) as ziface.IMessage value in return statement: *Message does not implement ziface.IMessage (missing method GetRawData)
+znet\heartbeat.go:86:13: h.conn.IsAlive undefined (type ziface.IConnection has no field or method IsAlive)
+znet\heartbeat.go:100:7: conn.SetHeartBeat undefined (type ziface.IConnection has no field or method SetHeartBeat)
+znet\heartbeat.go:100:7: too many errors

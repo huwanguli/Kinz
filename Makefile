@@ -1,0 +1,16 @@
+.PHONY: build vet test test-race cover
+
+build:
+	go build ./...
+
+vet:
+	go vet ./...
+
+test:
+	go test ./...
+
+test-race:
+	go test -race ./...
+
+cover:
+	go test -cover ./...
