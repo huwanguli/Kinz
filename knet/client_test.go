@@ -123,10 +123,20 @@ func TestClientReconnect(t *testing.T) {
 	// wait for the first connect
 	<-connStarts
 
-	// server force-closes the client's connection (client connID is 1)
-	conn, err := srv.GetConnMgr().Get(1)
-	if err != nil {
-		t.Fatalf("get server-side conn: %v", err)
+	// Wait until the server has registered the client's connection (its
+	// accept-loop Add races with the client's onConnStart).
+	var conn kiface.IConnection
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var err error
+		conn, err = srv.GetConnMgr().Get(1)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server never registered client conn: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	conn.Stop()
 

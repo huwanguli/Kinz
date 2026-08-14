@@ -43,15 +43,15 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 // Heartbeat timing is configured via Server.StartHeartBeat /
 // SetHeartBeatWithOption (not here), so the two never drift apart.
 type Config struct {
-	Name             string   `yaml:"Name"`
-	Host             string   `yaml:"Host"`
-	Port             int      `yaml:"Port"`
-	MaxConn          int      `yaml:"MaxConn"`
-	MaxPacketSize    uint32   `yaml:"MaxPacketSize"`
-	WorkerPoolSize   uint32   `yaml:"WorkerPoolSize"`
-	MaxWorkerTaskLen uint32   `yaml:"MaxWorkerTaskLen"`
-	WriteQueueSize   int      `yaml:"WriteQueueSize"`
-	WriteTimeout     Duration `yaml:"WriteTimeout"`
+	Name             string   `yaml:"Name" json:"name"`
+	Host             string   `yaml:"Host" json:"host"`
+	Port             int      `yaml:"Port" json:"port"`
+	MaxConn          int      `yaml:"MaxConn" json:"maxConn"`
+	MaxPacketSize    uint32   `yaml:"MaxPacketSize" json:"maxPacketSize"`
+	WorkerPoolSize   uint32   `yaml:"WorkerPoolSize" json:"workerPoolSize"`
+	MaxWorkerTaskLen uint32   `yaml:"MaxWorkerTaskLen" json:"maxWorkerTaskLen"`
+	WriteQueueSize   int      `yaml:"WriteQueueSize" json:"writeQueueSize"`
+	WriteTimeout     Duration `yaml:"WriteTimeout" json:"writeTimeout"`
 }
 
 // Default returns the built-in defaults.

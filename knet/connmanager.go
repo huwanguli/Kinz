@@ -57,6 +57,23 @@ func (cm *ConnManager) Len() int {
 	return len(cm.connections)
 }
 
+// Range implements kiface.IConnManager: iterates live connections; f returns
+// false to stop. Connections are snapshotted under the lock and invoked
+// outside it, so f may call back into the manager without deadlocking.
+func (cm *ConnManager) Range(f func(connID uint64, conn kiface.IConnection) bool) {
+	cm.mu.RLock()
+	conns := make([]kiface.IConnection, 0, len(cm.connections))
+	for _, conn := range cm.connections {
+		conns = append(conns, conn)
+	}
+	cm.mu.RUnlock()
+	for _, conn := range conns {
+		if !f(conn.GetConnID(), conn) {
+			return
+		}
+	}
+}
+
 // ClearConn implements kiface.IConnManager. Stops connections outside the lock
 // so Stop() may call Remove() without deadlocking.
 func (cm *ConnManager) ClearConn() {

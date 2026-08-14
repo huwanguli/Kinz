@@ -10,6 +10,9 @@ type IConnManager interface {
 	Get(connID uint64) (IConnection, error)
 	// Len returns the number of live connections.
 	Len() int
+	// Range iterates live connections (f returns false to stop). Safe to call
+	// connection methods from f.
+	Range(f func(connID uint64, conn IConnection) bool)
 	// ClearConn stops and removes all connections.
 	ClearConn()
 }
