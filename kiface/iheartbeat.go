@@ -23,7 +23,6 @@ type HeartBeatOption struct {
 	MakeMsg          HeartBeatMsgFunc
 	OnRemoteNotAlive OnRemoteNotAlive
 	HeartBeatMsgID   uint32
-	Router           IRouter
 	IRouterSlices    []RouterHandler
 	// Timeout is the liveness threshold; when no message is received within
 	// Timeout, OnRemoteNotAlive fires. Zero uses 3 * interval.
@@ -35,7 +34,6 @@ type IHeartbeatChecker interface {
 	SetOnRemoteNotAlive(OnRemoteNotAlive)
 	SetHeartBeatMsgFunc(HeartBeatMsgFunc)
 	SetHeartbeatFunc(HeartBeatFunc)
-	BindRouter(msgID uint32, router IRouter)
 	BindRouterSlices(msgID uint32, handlers ...RouterHandler)
 	Start()
 	Stop()
@@ -43,6 +41,5 @@ type IHeartbeatChecker interface {
 	BindConn(conn IConnection)
 	Clone() IHeartbeatChecker
 	MsgID() uint32
-	Router() IRouter
 	RouterSlices() []RouterHandler
 }

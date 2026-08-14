@@ -200,11 +200,6 @@ func (s *Server) rejectConn(conn net.Conn, cause error) error {
 	return conn.Close()
 }
 
-// AddRouter implements kiface.IServer.
-func (s *Server) AddRouter(msgID uint32, router kiface.IRouter) error {
-	return s.msgHandler.AddRouter(msgID, router)
-}
-
 // AddRouterSlices implements kiface.IServer.
 func (s *Server) AddRouterSlices(msgID uint32, handlers ...kiface.RouterHandler) (kiface.IRouterSlices, error) {
 	return s.msgHandler.AddRouterSlices(msgID, handlers...)
@@ -280,9 +275,6 @@ func (s *Server) SetHeartBeatWithOption(interval time.Duration, option *kiface.H
 		}
 		if option.HeartBeatMsgID != 0 {
 			tpl.msgID = option.HeartBeatMsgID
-		}
-		if option.Router != nil {
-			tpl.BindRouter(option.HeartBeatMsgID, option.Router)
 		}
 		if len(option.IRouterSlices) > 0 {
 			tpl.BindRouterSlices(option.HeartBeatMsgID, option.IRouterSlices...)

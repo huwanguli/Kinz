@@ -4,9 +4,6 @@ import "context"
 
 // IMsgHandle dispatches requests to routers and runs the worker pool.
 type IMsgHandle interface {
-	// AddRouter registers a classic router for msgID.
-	// Returns ErrMsgIDRegistered when msgID is already registered.
-	AddRouter(msgID uint32, router IRouter) error
 	// AddRouterSlices registers function-style handlers for msgID.
 	AddRouterSlices(msgID uint32, handlers ...RouterHandler) (IRouterSlices, error)
 	// Group scopes handlers to every msgID in [start, end].

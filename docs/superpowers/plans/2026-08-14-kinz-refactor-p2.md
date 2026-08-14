@@ -14,6 +14,7 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
    - **codec 合并**（覆盖原决策 1–4）：`IDecoder`（帧解码）与 `IDataPack`（消息解析）两个耦合接口冗余 → **合并为单一 `kiface.ICodec`**（`Decode` + `Pack` + `Clone`），默认实现 `knet.TLVPack`（payload 独立复制修复数据竞争）；删除 `FrameDecoder`、`LengthField`；`IServer`/`IClient` 统一 `SetCodec/GetCodec`。
    - **删除拦截器链**：`IInterceptor` 责任链与 `Use`/`Group` 中间件功能重叠且被完全覆盖 → 删除 `kinterceptor` 包、`IInterceptor/IChain/IcReq/IcResp`、`IRequest.GetResponse/SetResponse`、`AddInterceptor/SetHeadInterceptor`；`MsgHandler.Execute` 只做中间件链分发。
    - **删除死配置字段**：`kconf.Config` 的 `HeartbeatInterval/HeartbeatTimeout/ReadIdleTimeout` 框架零读取（心跳由 `StartHeartBeat` 显式配置）→ 删除。
+   - **删除经典路由**（用户确认，与拦截器同类的冗余）：`IRouter`/`BaseRouter`（PreHandle/Handle/PostHandle）被函数式 handler 完全覆盖 → 删除 `AddRouter`、`BindRouter`/`Call`、心跳的经典路由绑定（`HeartBeatOption.Router`/`IHeartbeatChecker.BindRouter/Router`）；路由只剩 `AddRouterSlices`/`Use`/`Group`。
 1. **kiface 修订**（P2 接口修订，随 P2 提交）：
    - `IServer.Address() net.Addr`（Port=0 时测试/运维需要真实地址）
    - `HeartBeatOption.Timeout time.Duration`（超时判定，默认 3×interval）
@@ -22,7 +23,7 @@ Server 生命周期、Connection、消息管线、RouterSlices/中间件、心�
 5. **kpool**：4K/16K/64K 三档 `sync.Pool`；`Get(size)` 返回 ≥size 档位缓冲，超 64K 直接分配；`Put` 校验档位，不匹配静默丢弃；Put 时首字节写哨兵 0xAA（误用检测）。
 6. **kconf**：`Config` 全字段 + `Duration` 自定义类型（YAML 支持 "10s" 字符串与纳秒整数）；加载链 默认→`conf/kinz.yaml`（缺失不 panic，非法报错）→`KINZ_*` 环境变量（非法报错）；`Load(path) (*Config, error)`。
 7. **Connection**：`stopOnce sync.Once` 幂等清理（hooks/hb 停止/socket 关闭/done 关闭/ConnMgr 移除），Reader 的 defer 只调 `stopOnce`（不等待自身），外部 `Stop()` = stopOnce + `wg.Wait`；`msgChan` 缓冲 `WriteQueueSize`（默认 256）**永不 close**，Writer 靠 done 退出；`SendMsg` 三路 select（msgChan/done/WriteTimeout）；`lastActivity` 原子时间戳，任何消息刷新，`IsAlive(timeout)` 判定。
-8. **MsgHandler**：`classicApis`（IRouter）+ `apis`（RouterHandler 切片）+ `globalHandlers` + `groupRanges`；`routerSlices`/`groupRouterSlices` 具体类型实现 P1 接口；`Execute` = 中间件链分发（含 recover）；Worker 池 ctx 取消 + 排空退出；池大小为 0 时直启 goroutine；重复注册返回 `ErrMsgIDRegistered`。
+8. **MsgHandler**：`apis`（RouterHandler 切片）+ `globalHandlers` + `groupRanges`；`routerSlices`/`groupRouterSlices` 具体类型实现 P1 接口；`Execute` = 中间件链分发（含 recover）；Worker 池 ctx 取消 + 排空退出；池大小为 0 时直启 goroutine；重复注册返回 `ErrMsgIDRegistered`。
 9. **心跳接线**：`StartHeartBeat(interval)`/`SetHeartBeatWithOption` 生成模板存入 Server；`Connection.Start()` 克隆模板→BindConn→Start；默认路由 `HeartBeatDefaultHandle` 自动注册（忽略重复注册错误）；修复旧 `if msgFunc == nil` 判断写反的 bug。
 10. **满连接拒绝**：accept 循环 `connMgr.Add` 返回 `ErrServerFull` → `rejectConn`：打包发送 `ServerFullMsgID` 消息（写超时保护）→ 关闭。
 11. **Server 生命周期**：`Run(ctx)` 启动 listener/Worker 池/accept 循环，阻塞至 ctx 取消返回 nil；`Shutdown(ctx)` = 关 listener → `ClearConn` 排空（ctx 超时）→ `StopWorkerPool(ctx)`，幂等；`Serve(ctx)` = Run + Shutdown 组合；`connID` 原子递增。

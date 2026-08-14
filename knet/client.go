@@ -32,9 +32,9 @@ func (c *Client) Restart() {}
 // Conn implements kiface.IClient. Phase 3.
 func (c *Client) Conn() kiface.IConnection { return nil }
 
-// AddRouter implements kiface.IClient. Phase 3.
-func (c *Client) AddRouter(msgID uint32, router kiface.IRouter) error {
-	return kiface.ErrNotImplemented
+// AddRouterSlices implements kiface.IClient. Phase 3.
+func (c *Client) AddRouterSlices(msgID uint32, handlers ...kiface.RouterHandler) (kiface.IRouterSlices, error) {
+	return nil, kiface.ErrNotImplemented
 }
 
 // SetOnConnStart implements kiface.IClient. Phase 3.

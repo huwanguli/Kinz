@@ -26,9 +26,6 @@ type IServer interface {
 	// (useful when Port is 0 for an ephemeral port).
 	Address() net.Addr
 
-	// AddRouter registers a classic three-stage IRouter for msgID.
-	// Returns ErrMsgIDRegistered when msgID is already registered.
-	AddRouter(msgID uint32, router IRouter) error
 	// AddRouterSlices registers function-style handlers for msgID.
 	AddRouterSlices(msgID uint32, handlers ...RouterHandler) (IRouterSlices, error)
 	// Group scopes handlers to every msgID in the inclusive range [start, end].

@@ -1,7 +1,7 @@
 package kiface
 
 // IRequest binds a connection and a message, and carries per-request state
-// through the router chain (middleware support: Call/Abort, context Set/Get).
+// through the router chain (middleware support: Abort, context Set/Get).
 type IRequest interface {
 	// GetConnection returns the connection that produced this request.
 	GetConnection() IConnection
@@ -14,17 +14,12 @@ type IRequest interface {
 	// SetMessage replaces the underlying message (middleware rewrites).
 	SetMessage(IMessage)
 
-	// BindRouter binds the classic router that handles this request.
-	BindRouter(IRouter)
-	// Call invokes the bound classic router (PreHandle/Handle/PostHandle).
-	Call()
-	// Abort stops the remaining function-style handlers; the current one finishes.
-	Abort()
-
 	// BindRouterSlices binds the function-style handler chain.
 	BindRouterSlices([]RouterHandler)
 	// RouterSlicesNext advances to the next function-style handler.
 	RouterSlicesNext()
+	// Abort stops the remaining function-style handlers; the current one finishes.
+	Abort()
 
 	// Copy returns a shallow copy of the request (worker-pool reuse).
 	Copy() IRequest
@@ -42,11 +37,9 @@ func (b BaseRequest) GetData() []byte                   { return nil }
 func (b BaseRequest) GetMsgID() uint32                  { return 0 }
 func (b BaseRequest) GetMessage() IMessage              { return nil }
 func (b BaseRequest) SetMessage(IMessage)               {}
-func (b BaseRequest) BindRouter(IRouter)                {}
-func (b BaseRequest) Call()                             {}
-func (b BaseRequest) Abort()                            {}
 func (b BaseRequest) BindRouterSlices([]RouterHandler)  {}
 func (b BaseRequest) RouterSlicesNext()                 {}
+func (b BaseRequest) Abort()                            {}
 func (b BaseRequest) Copy() IRequest                    { return nil }
 func (b BaseRequest) Set(key string, value interface{}) {}
 func (b BaseRequest) Get(key string) (interface{}, bool) {

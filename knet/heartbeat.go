@@ -24,7 +24,6 @@ type HeartBeatChecker struct {
 	beatFunc         kiface.HeartBeatFunc
 
 	msgID        uint32
-	router       kiface.IRouter
 	routerSlices []kiface.RouterHandler
 
 	connMu sync.RWMutex
@@ -72,14 +71,6 @@ func (h *HeartBeatChecker) SetHeartBeatMsgFunc(f kiface.HeartBeatMsgFunc) {
 func (h *HeartBeatChecker) SetHeartbeatFunc(f kiface.HeartBeatFunc) {
 	if f != nil {
 		h.beatFunc = f
-	}
-}
-
-// BindRouter implements kiface.IHeartbeatChecker.
-func (h *HeartBeatChecker) BindRouter(msgID uint32, router kiface.IRouter) {
-	if router != nil {
-		h.msgID = msgID
-		h.router = router
 	}
 }
 
@@ -180,7 +171,6 @@ func (h *HeartBeatChecker) Clone() kiface.IHeartbeatChecker {
 		onRemoteNotAlive: h.onRemoteNotAlive,
 		beatFunc:         h.beatFunc,
 		msgID:            h.msgID,
-		router:           h.router,
 	}
 	c.routerSlices = append(c.routerSlices, h.routerSlices...)
 	return c
@@ -188,9 +178,6 @@ func (h *HeartBeatChecker) Clone() kiface.IHeartbeatChecker {
 
 // MsgID implements kiface.IHeartbeatChecker.
 func (h *HeartBeatChecker) MsgID() uint32 { return h.msgID }
-
-// Router implements kiface.IHeartbeatChecker.
-func (h *HeartBeatChecker) Router() kiface.IRouter { return h.router }
 
 // RouterSlices implements kiface.IHeartbeatChecker.
 func (h *HeartBeatChecker) RouterSlices() []kiface.RouterHandler { return h.routerSlices }

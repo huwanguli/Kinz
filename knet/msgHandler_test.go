@@ -11,16 +11,13 @@ func msgIDRequest(id uint32) *Request {
 	return NewRequest(nil, NewMessage(id, nil))
 }
 
-func TestAddRouterDuplicate(t *testing.T) {
+func TestAddSlicesDuplicate(t *testing.T) {
 	mh := NewMsgHandler(0, 0)
-	if err := mh.AddRouter(1, &BaseRouter{}); err != nil {
-		t.Fatalf("AddRouter: %v", err)
-	}
-	if err := mh.AddRouter(1, &BaseRouter{}); !errors.Is(err, kiface.ErrMsgIDRegistered) {
-		t.Fatalf("duplicate classic = %v, want ErrMsgIDRegistered", err)
+	if err := mh.addSlices(1, func(kiface.IRequest) {}); err != nil {
+		t.Fatalf("addSlices: %v", err)
 	}
 	if err := mh.addSlices(1, func(kiface.IRequest) {}); !errors.Is(err, kiface.ErrMsgIDRegistered) {
-		t.Fatalf("classic then slices = %v, want ErrMsgIDRegistered", err)
+		t.Fatalf("duplicate = %v, want ErrMsgIDRegistered", err)
 	}
 }
 
@@ -95,39 +92,6 @@ func TestGroupOutOfRange(t *testing.T) {
 	}
 	if err := g.AddHandler(15, func(kiface.IRequest) {}); err != nil {
 		t.Fatalf("in-range AddHandler: %v", err)
-	}
-}
-
-type classicTestRouter struct {
-	BaseRouter
-	order *[]string
-}
-
-func (r *classicTestRouter) PreHandle(kiface.IRequest) { *r.order = append(*r.order, "pre") }
-func (r *classicTestRouter) Handle(kiface.IRequest)    { *r.order = append(*r.order, "handle") }
-func (r *classicTestRouter) PostHandle(kiface.IRequest) {
-	*r.order = append(*r.order, "post")
-}
-
-func TestClassicRouterWithMiddleware(t *testing.T) {
-	mh := NewMsgHandler(0, 0)
-	var order []string
-	mh.globalHandlers = append(mh.globalHandlers, func(req kiface.IRequest) {
-		order = append(order, "mw")
-		req.RouterSlicesNext()
-	})
-	if err := mh.AddRouter(3, &classicTestRouter{order: &order}); err != nil {
-		t.Fatalf("AddRouter: %v", err)
-	}
-	mh.Execute(msgIDRequest(3))
-	want := []string{"mw", "pre", "handle", "post"}
-	if len(order) != len(want) {
-		t.Fatalf("order = %v, want %v", order, want)
-	}
-	for i := range want {
-		if order[i] != want[i] {
-			t.Fatalf("order = %v, want %v", order, want)
-		}
 	}
 }
 

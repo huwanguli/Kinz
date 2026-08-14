@@ -12,8 +12,7 @@ type Request struct {
 	index    int
 	aborted  bool
 
-	router kiface.IRouter
-	ctx    map[string]any
+	ctx map[string]any
 }
 
 // NewRequest creates a Request for conn/msg.
@@ -36,23 +35,6 @@ func (r *Request) GetMessage() kiface.IMessage { return r.msg }
 // SetMessage implements kiface.IRequest.
 func (r *Request) SetMessage(m kiface.IMessage) { r.msg = m }
 
-// BindRouter implements kiface.IRequest.
-func (r *Request) BindRouter(router kiface.IRouter) { r.router = router }
-
-// Call implements kiface.IRequest: runs the bound classic router.
-func (r *Request) Call() {
-	if r.router == nil {
-		return
-	}
-	r.router.PreHandle(r)
-	r.router.Handle(r)
-	r.router.PostHandle(r)
-}
-
-// Abort implements kiface.IRequest: stops the remaining function-style
-// handlers; the currently running handler finishes.
-func (r *Request) Abort() { r.aborted = true }
-
 // BindRouterSlices implements kiface.IRequest.
 func (r *Request) BindRouterSlices(handlers []kiface.RouterHandler) {
 	r.handlers = handlers
@@ -73,6 +55,10 @@ func (r *Request) RouterSlicesNext() {
 	h(r)
 }
 
+// Abort implements kiface.IRequest: stops the remaining function-style
+// handlers; the currently running handler finishes.
+func (r *Request) Abort() { r.aborted = true }
+
 // Copy implements kiface.IRequest: shallow copy for worker-pool reuse.
 func (r *Request) Copy() kiface.IRequest {
 	return &Request{
@@ -80,7 +66,6 @@ func (r *Request) Copy() kiface.IRequest {
 		msg:      r.msg,
 		handlers: r.handlers,
 		index:    r.index,
-		router:   r.router,
 	}
 }
 

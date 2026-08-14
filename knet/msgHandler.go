@@ -16,12 +16,11 @@ type groupRange struct {
 	handlers   []kiface.RouterHandler
 }
 
-// MsgHandler implements kiface.IMsgHandle: classic routers and function-style
-// router slices (with global/group middleware), a worker pool for ordered
-// per-connection dispatch, and an interceptor chain.
+// MsgHandler implements kiface.IMsgHandle: function-style router slices with
+// global/group middleware, a worker pool for ordered per-connection dispatch,
+// and panic recovery.
 type MsgHandler struct {
 	mu             sync.RWMutex
-	classicApis    map[uint32]kiface.IRouter
 	apis           map[uint32][]kiface.RouterHandler
 	groupRanges    []groupRange
 	globalHandlers []kiface.RouterHandler
@@ -38,32 +37,17 @@ type MsgHandler struct {
 // (one goroutine per message).
 func NewMsgHandler(workerPoolSize, maxWorkerTaskLen uint32) *MsgHandler {
 	return &MsgHandler{
-		classicApis:      make(map[uint32]kiface.IRouter),
 		apis:             make(map[uint32][]kiface.RouterHandler),
 		workerPoolSize:   workerPoolSize,
 		maxWorkerTaskLen: maxWorkerTaskLen,
 	}
 }
 
-// AddRouter implements kiface.IMsgHandle.
-func (mh *MsgHandler) AddRouter(msgID uint32, router kiface.IRouter) error {
-	mh.mu.Lock()
-	defer mh.mu.Unlock()
-	if _, ok := mh.classicApis[msgID]; ok {
-		return fmt.Errorf("%w: msgID %d", kiface.ErrMsgIDRegistered, msgID)
-	}
-	if _, ok := mh.apis[msgID]; ok {
-		return fmt.Errorf("%w: msgID %d", kiface.ErrMsgIDRegistered, msgID)
-	}
-	mh.classicApis[msgID] = router
-	return nil
-}
-
 // addSlices registers function-style handlers for msgID.
 func (mh *MsgHandler) addSlices(msgID uint32, handlers ...kiface.RouterHandler) error {
 	mh.mu.Lock()
 	defer mh.mu.Unlock()
-	if _, ok := mh.classicApis[msgID]; ok {
+	if _, ok := mh.apis[msgID]; ok {
 		return fmt.Errorf("%w: msgID %d", kiface.ErrMsgIDRegistered, msgID)
 	}
 	mh.apis[msgID] = append(mh.apis[msgID], handlers...)
@@ -194,7 +178,6 @@ func (mh *MsgHandler) Execute(request kiface.IRequest) {
 	msgID := request.GetMsgID()
 	mh.mu.RLock()
 	handlers, hasSlices := mh.apis[msgID]
-	router, hasClassic := mh.classicApis[msgID]
 	global := append([]kiface.RouterHandler(nil), mh.globalHandlers...)
 	var groups []kiface.RouterHandler
 	for _, g := range mh.groupRanges {
@@ -204,16 +187,12 @@ func (mh *MsgHandler) Execute(request kiface.IRequest) {
 	}
 	mh.mu.RUnlock()
 
-	if !hasSlices && !hasClassic && len(global) == 0 && len(groups) == 0 {
+	if !hasSlices && len(global) == 0 && len(groups) == 0 {
 		return // nothing registered for this msgID
 	}
 
 	all := append(global, groups...)
 	all = append(all, handlers...)
-	if hasClassic && !hasSlices {
-		request.BindRouter(router)
-		all = append(all, func(req kiface.IRequest) { req.Call() })
-	}
 	request.BindRouterSlices(all)
 	request.RouterSlicesNext()
 }

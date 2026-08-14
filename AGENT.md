@@ -40,7 +40,7 @@ go test -race ./...
 
 - **Server** (`knet/server.go`): `Run(ctx)` / `Shutdown(ctx)` / `Serve(ctx)` lifecycle with graceful shutdown (stop accepting → drain connections → stop worker pool), `Address()` for ephemeral ports, max-conn rejection (sends `kiface.ServerFullMsgID` then closes), heartbeat template wiring, option-based construction (`WithConfig`/`WithMaxConn`/`WithName`).
 - **Connection** (`knet/connection.go`): reader/writer goroutines, buffered write queue with timeout, atomic liveness tracking (`IsAlive`/`touch`), idempotent `Stop` via `sync.Once`, pooled read buffer (`kpool`), per-connection decoder clone.
-- **Routing** (`knet/msgHandler.go` + `routerSlices.go`): classic `IRouter` and function-style `IRouterSlices` with global `Use` / range `Group` middleware, `Abort`, panic recovery per message, worker pool with graceful drain (`StopWorkerPool`), blocking backpressure. Middleware (`Use`/`Group`) is the single pipeline mechanism — the old interceptor chain was removed as redundant (it is fully covered by middleware, which can replace messages via `req.SetMessage`).
+- **Routing** (`knet/msgHandler.go` + `routerSlices.go`): single function-style routing (`AddRouterSlices` + `Use`/`Group` middleware) with `Abort`, panic recovery per message, worker pool with graceful drain (`StopWorkerPool`), blocking backpressure. The classic `IRouter` (PreHandle/Handle/PostHandle) and the interceptor chain were both removed as redundant — middleware covers all pipeline needs (including message replacement via `req.SetMessage`).
 - **Heartbeat** (`knet/heartbeat.go`): interval + timeout (default 3×interval), any received message refreshes liveness, `OnRemoteNotAlive` defaults to graceful close, clone-per-connection.
 - **Codec** (`knet/datapack.go`): `knet.TLVPack` implements the single `kiface.ICodec` seam (framing + TLV parse + Pack in one unit, `Clone` per connection). Handles sticky/half packets internally, configurable byte order, returns `ErrTooLargePacket` on oversize; decoded payloads are copied so asynchronous processing is safe. Custom wire formats implement one `ICodec` (no separate frame decoder / packet pair).
 - **Config** (`kconf`): defaults → `conf/kinz.yaml` (missing file is fine) → `KINZ_*` env vars; durations accept "10s" strings or nanosecond ints.
@@ -50,7 +50,7 @@ go test -race ./...
 ## Code Conventions
 
 - **Interface-first**: define the contract in `kiface` before implementing in `knet`.
-- **Convention-first**: default paths are production-safe (heartbeat, max-conn rejection, panic recovery, graceful shutdown); extension happens at seams (`ICodec`, `RouterHandler` middleware via `Use`/`Group`, `IRouter`/`IRouterSlices`, `ILogger`, `IMetrics`).
+- **Convention-first**: default paths are production-safe (heartbeat, max-conn rejection, panic recovery, graceful shutdown); extension happens at seams (`ICodec`, `RouterHandler` middleware via `Use`/`Group`, `ILogger`, `IMetrics`).
 - **Middleware contract**: a function-style handler must call `req.RouterSlicesNext()` to continue the chain (gin-style); `req.Abort()` stops it.
 - **Errors**: use sentinel errors from `kiface`, wrap with `%w`. No panics in library code paths.
 - **Byte order**: a wire-protocol decision — always explicit `binary.ByteOrder`, configurable (see `DataPack`/`NewDataPackWithOrder`); never probe host endianness.

@@ -14,8 +14,8 @@ type IClient interface {
 
 	// Conn returns the current connection (nil when disconnected).
 	Conn() IConnection
-	// AddRouter registers a classic router for msgID.
-	AddRouter(msgID uint32, router IRouter) error
+	// AddRouterSlices registers function-style handlers for msgID.
+	AddRouterSlices(msgID uint32, handlers ...RouterHandler) (IRouterSlices, error)
 
 	// SetOnConnStart / SetOnConnStop register connection lifecycle hooks.
 	SetOnConnStart(func(IConnection))

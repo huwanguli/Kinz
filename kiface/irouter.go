@@ -1,17 +1,10 @@
 package kiface
 
-// IRouter is the classic three-stage router. Embed BaseRouter in
-// implementations and override only the methods you need.
-type IRouter interface {
-	// PreHandle runs before Handle.
-	PreHandle(request IRequest)
-	// Handle runs the main business logic.
-	Handle(request IRequest)
-	// PostHandle runs after Handle.
-	PostHandle(request IRequest)
-}
-
-// RouterHandler is a function-style message handler.
+// RouterHandler is a function-style message handler. It is the single routing
+// primitive: register route handlers with AddRouterSlices, global middleware
+// with Use, and range-scoped middleware with Group. A handler must call
+// request.RouterSlicesNext() to continue the chain (gin-style); Abort() stops
+// the remaining handlers.
 type RouterHandler func(request IRequest)
 
 // IRouterSlices is the function-style router with middleware support.

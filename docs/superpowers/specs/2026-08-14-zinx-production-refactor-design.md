@@ -45,7 +45,7 @@
 |--------|------|----------|
 | 编解码 | `ICodec`（Decode/Pack/Clone 一体） | `knet.TLVPack`（小端 TLV，内部处理粘包/半包） |
 | 中间件 | `RouterHandler`（`Use` 全局 / `Group` 区间） | 空（可插入鉴权/加解密/限流） |
-| 路由 | `IRouter` / `IRouterSlices` | 经典三段式 + 函数式中间件链 |
+| 路由 | `RouterHandler` / `IRouterSlices` | 函数式中间件链（`AddRouterSlices`/`Use`/`Group`） |
 | 日志 | `ILogger` | slog 封装 |
 | 指标 | `IMetrics` | 原子计数/直方图注册表 |
 
@@ -118,7 +118,7 @@ kinz/
 
 ```
 ┌─────────────────────────── 应用层（业务代码）───────────────────────────┐
-│   IRouter（经典三段式） / IRouterSlices（函数式+中间件）                    │
+│   RouterHandler / IRouterSlices（函数式 + 中间件）                         │
 └──────────────────────────────────────────────────────────────────────┘
 ┌─────────────────────────── 框架层（kinz）──────────────────────────────┐
 │  Server（生命周期 Run/Shutdown，Option 配置）                            │
@@ -126,7 +126,7 @@ kinz/
 │  ├─ Connection（读协程 + 写协程，原子状态机，IsAlive，缓冲池化）            │
 │  │    ├─ ICodec（池化读缓冲，内部处理粘包/半包）→ 中间件链              │
 │  │    └─ msgChan(缓冲+超时) → Writer → socket                           │
-│  ├─ MsgHandler（RouterSlices/经典路由，Worker 池，panic 恢复）            │
+│  ├─ MsgHandler（RouterSlices + 中间件，Worker 池，panic 恢复）            │
 │  ├─ HeartBeatChecker（Server 配置 → 每连接 Clone，超时回调）              │
 │  ├─ ConnManager（原子计数，满连接拒绝钩子）                               │
 │  └─ kmetrics（连接/消息/错误/字节/心跳丢失/队列深度）                       │
@@ -192,11 +192,11 @@ kinz/
   - 队列打满时的背压策略：阻塞发送（保持有序）并在指标上计数 `queue_full`（v1 不做丢弃）。
 - 无池模式（WorkerPoolSize=0）：每个消息一个 goroutine，同样受 panic 恢复保护。
 
-### 6.5 路由体系（补齐 RouterSlices）
+### 6.5 路由体系（唯一风格：函数式 + 中间件）
 
 - 完整实现 `IRouterSlices`：`Use`（全局中间件）、`Group(start, end, ...)`（区间分组中间件）、`AddHandler(msgID, ...)`、`GetHandlers`。
-- `Request` 完整实现 `IRequest`：`Abort`（终止后续处理器）、`Call/RouterSlicesNext`（链式推进）、`Set/Get`（请求级上下文）、`Copy`、`GetMessage/GetResponse/SetResponse`、`BindRouter/BindRouterSlices`。
-- 经典 `IRouter`（PreHandle/Handle/PostHandle）保留，`BaseRouter` 保留。
+- `Request` 完整实现 `IRequest`：`Abort`（终止后续处理器）、`RouterSlicesNext`（链式推进）、`Set/Get`（请求级上下文）、`Copy`、`SetMessage`（中间件替换消息）、`BindRouterSlices`。
+- **经典 `IRouter`/`BaseRouter` 已删除**（P2 设计修订：三段式与函数式 handler 重叠且被完全覆盖）——`AddRouterSlices` 注册业务，`Use`/`Group` 挂中间件，`RouterSlicesNext()` 续链、`Abort()` 终止。
 - 注册期校验：msgID 重复注册返回 error（不再 panic）。
 
 ### 6.6 心跳保活（接通主链路）
