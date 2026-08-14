@@ -54,6 +54,7 @@ go test -race ./...
 
 ## Docs Map
 
+- `README.md` — GitHub 主页入口（特性、快速开始、性能、质量）
 - `docs/architecture.md` — 包结构、数据流、生命周期、约定与扩展点
 - `docs/protocol.md` — TLV 线协议、字节序、粘包/半包、自定义 ICodec
 - `docs/configuration.md` — kconf 字段、YAML、env、Option

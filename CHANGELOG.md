@@ -2,6 +2,12 @@
 
 本项目（原 zinx，重构后更名 **Kinz**）所有重要变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- `README.md`：GitHub 主页入口文档（特性、快速开始代码、架构图、性能概览、质量保障、示例与文档导航）
+
 ## [v1.0.0] - 2026-08-14
 
 ### 发布（P6：测试补强 + 发布）
