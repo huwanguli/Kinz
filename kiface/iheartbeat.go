@@ -1,7 +1,13 @@
 package kiface
 
+import "time"
+
 // HeartBeatDefaultMsgID is the default heartbeat message id.
 const HeartBeatDefaultMsgID uint32 = 99999
+
+// ServerFullMsgID is the message id sent to a connection rejected because the
+// server reached its max-connection limit.
+const ServerFullMsgID uint32 = 0xFFFFFFFE
 
 // HeartBeatMsgFunc builds the payload of a heartbeat message.
 type HeartBeatMsgFunc func(conn IConnection) []byte
@@ -19,6 +25,9 @@ type HeartBeatOption struct {
 	HeartBeatMsgID   uint32
 	Router           IRouter
 	IRouterSlices    []RouterHandler
+	// Timeout is the liveness threshold; when no message is received within
+	// Timeout, OnRemoteNotAlive fires. Zero uses 3 * interval.
+	Timeout time.Duration
 }
 
 // IHeartbeatChecker tracks liveness of one connection and sends heartbeats.

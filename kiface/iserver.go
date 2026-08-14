@@ -2,6 +2,7 @@ package kiface
 
 import (
 	"context"
+	"net"
 	"time"
 )
 
@@ -21,6 +22,9 @@ type IServer interface {
 
 	// Name returns the server name.
 	Name() string
+	// Address returns the actual listen address, or nil before Run binds
+	// (useful when Port is 0 for an ephemeral port).
+	Address() net.Addr
 
 	// AddRouter registers a classic three-stage IRouter for msgID.
 	// Returns ErrMsgIDRegistered when msgID is already registered.
