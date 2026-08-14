@@ -37,6 +37,11 @@ func NewFrameDecoder(lf kiface.LengthField) *FrameDecoder {
 	return frameDecoder
 }
 
+// GetLengthField returns the length-field configuration of this decoder.
+func (d *FrameDecoder) GetLengthField() *kiface.LengthField {
+	return &d.LengthField
+}
+
 func (d *FrameDecoder) fail(frameLength int64) {}
 
 func (d *FrameDecoder) discardingTooLongFrameFunc(buffer *bytes.Buffer) {
