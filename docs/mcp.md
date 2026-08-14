@@ -2,12 +2,13 @@
 
 Kinz 通过 `kmcp` 包把运行中的服务器暴露给 AI 工具（Claude Desktop、IDE、任意 MCP 客户端），实现"AI 开发友好"的运行时闭环。
 
-## 协议
+> **kmcp 是可选开启项（opt-in）**：核心框架从不 import 它；只有你的应用显式 import `kinz/kmcp` 时才会链接（并引入 MCP SDK 依赖）。不需要 MCP 的应用零影响。
 
-- **JSON-RPC 2.0**，每行一条消息（newline-delimited JSON），零外部依赖手写实现。
-- 支持 MCP 子集：`initialize` 握手、`notifications/initialized`、`ping`、`tools/list`、`tools/call`、`resources/list`、`resources/read`。
-- 协议版本：`2025-06-18`（也接受 `2024-11-05`；未知版本回退到最新）。
-- 两种传输：**stdio**（Claude Desktop 约定）与 **TCP**（同一行式 JSON）。
+## 实现
+
+- 基于 **mark3labs/mcp-go**（MCP 官方协议规范完整实现），工具/资源注册在 SDK 之上。
+- 传输：**stdio**（Claude Desktop 约定）与 **streamable HTTP**（远程客户端标准传输）。
+- 能力：`initialize` 握手、`tools/list`、`tools/call`、`resources/list`、`resources/read`、`ping`、`notifications`。
 
 ## 接入方式
 
@@ -16,9 +17,12 @@ import "kinz/kmcp"
 
 s := knet.NewServer(...)
 
-// TCP 端点（供 MCP 客户端连接）
+// streamable HTTP 端点（标准远程 MCP 传输；默认路径 /mcp）
 mcp := kmcp.NewServer(s, kmcp.WithConfig(cfg), kmcp.WithLogRing(ring))
-go func() { _ = mcp.ListenAndServe("127.0.0.1:9001") }()
+go func() { _ = mcp.ServeHTTP("127.0.0.1:9001") }()
+
+// 挂到自己的 HTTP mux
+mux.Handle("/mcp", mcp.Handler())
 
 // stdio 端点（给 Claude Desktop 指向可执行文件）
 mcp.ServeStdio()
@@ -62,21 +66,14 @@ mcp.ServeStdio()
 {
   "mcpServers": {
     "kinz": {
-      "command": "kinz-mcp-stdio",      // 你的 stdio 桥可执行文件
+      "command": "kinz-mcp-stdio",
       "args": []
     }
   }
 }
 ```
 
-或直接对 TCP 端点发送行式 JSON（任意 MCP 客户端或脚本）：
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
-{"jsonrpc":"2.0","id":2,"method":"tools/list"}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_connections","arguments":{}}}
-{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"send_to_connection","arguments":{"connID":1,"msgID":1,"data":"hello"}}}
-```
+任意 MCP 客户端连接 streamable HTTP 端点后即可调用工具（如 `list_connections`、`send_to_connection`）。
 
 ## 安全
 
@@ -85,5 +82,6 @@ mcp.ServeStdio()
 
 ## 设计说明
 
-- `kmcp` 是**独立适配器**：只依赖 `kiface`/`kconf`/`klog`/`kmetrics`，不依赖 `knet`（应用负责接线），因此无循环依赖、可独立测试。
-- 手写 JSON-RPC 保持核心零外部依赖；如需要完整 MCP 协议（流式 HTTP、采样等），可在 `Transport` 层替换为官方 SDK。
+- `kmcp` 是**独立适配器**：只依赖 `kiface`/`kconf`/`klog`/`kmetrics` + mcp-go，不依赖 `knet`（应用负责接线），因此无循环依赖、可独立测试。
+- MCP SDK 依赖仅在 import kmcp 时链接——这就是"可选开启"的代价边界。
+

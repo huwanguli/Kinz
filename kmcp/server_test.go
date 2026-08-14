@@ -1,10 +1,14 @@
 package kmcp
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
 
 	"kinz/kconf"
 	"kinz/kiface"
@@ -14,137 +18,83 @@ import (
 
 var errAuth = errors.New("denied")
 
-func newTestMCP(t *testing.T, opts ...Option) (*Server, kiface.IServer) {
+func newTestServer(t *testing.T, opts ...Option) (*Server, kiface.IServer) {
 	t.Helper()
 	srv := knet.NewServer()
-	mcp := NewServer(srv, opts...)
-	return mcp, srv
+	m := NewServer(srv, opts...)
+	return m, srv
 }
 
-// call feeds one JSON-RPC message and returns the decoded response.
-func call(t *testing.T, mcp *Server, msg string) map[string]any {
+// newMCPClient connects an mcp-go client to the server's streamable-HTTP
+// handler via httptest and completes the initialize handshake.
+func newMCPClient(t *testing.T, ts *httptest.Server) *client.Client {
 	t.Helper()
-	resp := mcp.handleMessage([]byte(msg))
-	if resp == nil {
-		t.Fatalf("no response for %s", msg)
+	c, err := client.NewStreamableHttpClient(ts.URL)
+	if err != nil {
+		t.Fatalf("client: %v", err)
 	}
-	var m map[string]any
-	if err := json.Unmarshal(resp, &m); err != nil {
-		t.Fatalf("unmarshal %s: %v", resp, err)
+	if _, err := c.Initialize(context.Background(), mcp.InitializeRequest{}); err != nil {
+		t.Fatalf("initialize: %v", err)
 	}
-	return m
+	return c
 }
 
-// toolText extracts the text content of a tools/call result.
-func toolText(t *testing.T, resp map[string]any) string {
+// callTool invokes a tool and concatenates its text content.
+func callTool(t *testing.T, c *client.Client, name string, args map[string]any) string {
 	t.Helper()
-	if e, ok := resp["error"]; ok {
-		t.Fatalf("unexpected error: %v", e)
+	res, err := c.CallTool(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Name: name, Arguments: args},
+	})
+	if err != nil {
+		t.Fatalf("call %s: %v", name, err)
 	}
-	result := resp["result"].(map[string]any)
-	content := result["content"].([]any)[0].(map[string]any)
-	return content["text"].(string)
+	var sb strings.Builder
+	for _, content := range res.Content {
+		if tc, ok := content.(mcp.TextContent); ok {
+			sb.WriteString(tc.Text)
+		}
+	}
+	return sb.String()
 }
 
-func TestInitialize(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`)
-	if resp["error"] != nil {
-		t.Fatalf("initialize error: %v", resp["error"])
-	}
-	result := resp["result"].(map[string]any)
-	if result["protocolVersion"] != "2025-06-18" {
-		t.Fatalf("protocolVersion = %v", result["protocolVersion"])
-	}
-	si := result["serverInfo"].(map[string]any)
-	if si["name"] != "kinz-mcp" {
-		t.Fatalf("serverInfo = %v", si)
-	}
-}
+func TestToolsListCount(t *testing.T) {
+	m, _ := newTestServer(t)
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
 
-func TestInitializeUnknownVersionFallsBack(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2999-01-01"}}`)
-	result := resp["result"].(map[string]any)
-	if result["protocolVersion"] != latestProtocol {
-		t.Fatalf("protocolVersion = %v, want latest %s", result["protocolVersion"], latestProtocol)
+	tools, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
 	}
-}
-
-func TestNotificationNoResponse(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	if resp := mcp.handleMessage([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); resp != nil {
-		t.Fatalf("notification got response: %s", resp)
-	}
-}
-
-func TestPing(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":2,"method":"ping"}`)
-	if resp["error"] != nil {
-		t.Fatalf("ping error: %v", resp["error"])
-	}
-}
-
-func TestToolsList(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":3,"method":"tools/list"}`)
-	tools := resp["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 10 {
-		t.Fatalf("tools = %d, want 10", len(tools))
+	if len(tools.Tools) != 10 {
+		t.Fatalf("tools = %d, want 10", len(tools.Tools))
 	}
 }
 
 func TestServerInfoTool(t *testing.T) {
-	mcp, srv := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"server_info","arguments":{}}}`)
-	text := toolText(t, resp)
+	m, srv := newTestServer(t)
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	text := callTool(t, c, "server_info", nil)
 	if !strings.Contains(text, srv.Name()) {
 		t.Fatalf("server_info missing name: %s", text)
 	}
-}
-
-func TestUnknownMethod(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":5,"method":"nope"}`)
-	e := resp["error"].(map[string]any)
-	if e["code"].(float64) != codeMethodNotFound {
-		t.Fatalf("error = %v, want -32601", e)
-	}
-}
-
-func TestParseError(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{invalid`)
-	e := resp["error"].(map[string]any)
-	if e["code"].(float64) != codeParseError {
-		t.Fatalf("error = %v, want -32700", e)
-	}
-}
-
-func TestAuthDenied(t *testing.T) {
-	mcp, _ := newTestMCP(t, WithAuth(func(method string) error { return errAuth }))
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_metrics","arguments":{}}}`)
-	e := resp["error"].(map[string]any)
-	if e["code"].(float64) != codeAuthDenied {
-		t.Fatalf("error = %v, want auth denied", e)
-	}
-}
-
-func TestUnknownTool(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"no_such_tool","arguments":{}}}`)
-	e := resp["error"].(map[string]any)
-	if e["code"].(float64) != codeInvalidParams {
-		t.Fatalf("error = %v, want -32602", e)
+	if !strings.Contains(text, `"version": "0.1.0"`) {
+		t.Fatalf("server_info missing version: %s", text)
 	}
 }
 
 func TestGetConfigTool(t *testing.T) {
 	cfg := kconf.Default()
-	mcp, _ := newTestMCP(t, WithConfig(cfg))
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_config","arguments":{}}}`)
-	text := toolText(t, resp)
+	m, _ := newTestServer(t, WithConfig(cfg))
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	text := callTool(t, c, "get_config", nil)
 	if !strings.Contains(text, `"name": "KinzServer"`) {
 		t.Fatalf("config missing name: %s", text)
 	}
@@ -153,28 +103,76 @@ func TestGetConfigTool(t *testing.T) {
 func TestGetLogsTool(t *testing.T) {
 	ring := klog.NewRingBuffer(1024)
 	_, _ = ring.Write([]byte("line1\nline2\n"))
-	mcp, _ := newTestMCP(t, WithLogRing(ring))
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"get_logs","arguments":{"lines":10}}}`)
-	text := toolText(t, resp)
+	m, _ := newTestServer(t, WithLogRing(ring))
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	text := callTool(t, c, "get_logs", map[string]any{"lines": 10})
 	if !strings.Contains(text, "line1") || !strings.Contains(text, "line2") {
 		t.Fatalf("logs missing lines: %s", text)
 	}
 }
 
+func TestGetMetricsTool(t *testing.T) {
+	m, _ := newTestServer(t)
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	text := callTool(t, c, "get_metrics", nil)
+	if !strings.Contains(text, "kinz_conns_total") {
+		t.Fatalf("metrics missing counters: %s", text)
+	}
+}
+
+func TestAuthDenied(t *testing.T) {
+	m, _ := newTestServer(t, WithAuth(func(method string) error { return errAuth }))
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	if _, err := c.CallTool(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Name: "get_metrics", Arguments: nil},
+	}); err == nil || !strings.Contains(err.Error(), "authorization denied") {
+		t.Fatalf("expected authorization denial, got %v", err)
+	}
+}
+
+func TestUnknownTool(t *testing.T) {
+	m, _ := newTestServer(t)
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	if _, err := c.CallTool(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Name: "no_such_tool", Arguments: nil},
+	}); err == nil {
+		t.Fatal("expected error for unknown tool")
+	}
+}
+
 func TestResourcesListAndRead(t *testing.T) {
-	mcp, _ := newTestMCP(t)
-	resp := call(t, mcp, `{"jsonrpc":"2.0","id":10,"method":"resources/list"}`)
-	rs := resp["result"].(map[string]any)["resources"].([]any)
-	if len(rs) != 4 {
-		t.Fatalf("resources = %d, want 4", len(rs))
+	m, _ := newTestServer(t)
+	ts := httptest.NewServer(m.Handler())
+	defer ts.Close()
+	c := newMCPClient(t, ts)
+
+	res, err := c.ListResources(context.Background(), mcp.ListResourcesRequest{})
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(res.Resources) != 4 {
+		t.Fatalf("resources = %d, want 4", len(res.Resources))
 	}
 
-	resp = call(t, mcp, `{"jsonrpc":"2.0","id":11,"method":"resources/read","params":{"uri":"metrics://"}}`)
-	if resp["error"] != nil {
-		t.Fatalf("read metrics: %v", resp["error"])
+	read, err := c.ReadResource(context.Background(), mcp.ReadResourceRequest{
+		Params: mcp.ReadResourceParams{URI: "metrics://"},
+	})
+	if err != nil {
+		t.Fatalf("ReadResource: %v", err)
 	}
-	resp = call(t, mcp, `{"jsonrpc":"2.0","id":12,"method":"resources/read","params":{"uri":"nope://"}}`)
-	if resp["error"] == nil {
-		t.Fatal("expected error for unknown uri")
+	if len(read.Contents) == 0 {
+		t.Fatal("empty resource contents")
 	}
 }

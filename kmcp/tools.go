@@ -2,104 +2,115 @@ package kmcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
 
 	"kinz/kiface"
 )
 
-// tool describes an MCP tool.
-type tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-}
+// registerTools registers the Kinz management tools on the MCP server.
+func (s *Server) registerTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("server_info", mcp.WithDescription("Returns the server name, version, listen address and uptime.")),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			return s.toolServerInfo()
+		}))
 
-func schema(required []string, props map[string]any) map[string]any {
-	return map[string]any{"type": "object", "properties": props, "required": required}
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_connections", mcp.WithDescription("Lists all live connections (id, remote, local).")),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			return s.toolListConnections(), nil
+		}))
 
-func intProp(desc string) map[string]any {
-	return map[string]any{"type": "integer", "description": desc}
-}
-func strProp(desc string) map[string]any {
-	return map[string]any{"type": "string", "description": desc}
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_connection", mcp.WithDescription("Returns details of one connection by id."),
+			mcp.WithNumber("connID", mcp.Required(), mcp.Description("Connection id"))),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			id, ok := argUint(req, "connID")
+			if !ok {
+				return nil, fmt.Errorf("connID (integer) is required")
+			}
+			return s.toolGetConnection(id)
+		}))
 
-func (s *Server) toolsList() any {
-	tools := []tool{
-		{"server_info", "Returns the server name, version, listen address and uptime.", schema(nil, nil)},
-		{"list_connections", "Lists all live connections (id, remote, local).", schema(nil, nil)},
-		{"get_connection", "Returns details of one connection by id.", schema([]string{"connID"}, map[string]any{"connID": intProp("Connection id")})},
-		{"send_to_connection", "Sends a message to one connection.", schema([]string{"connID", "msgID", "data"}, map[string]any{"connID": intProp("Connection id"), "msgID": intProp("Message id"), "data": strProp("Payload")})},
-		{"broadcast", "Sends a message to every live connection.", schema([]string{"msgID", "data"}, map[string]any{"msgID": intProp("Message id"), "data": strProp("Payload")})},
-		{"close_connection", "Gracefully closes one connection.", schema([]string{"connID"}, map[string]any{"connID": intProp("Connection id")})},
-		{"get_metrics", "Returns the server metrics (counters, gauges, histograms).", schema(nil, nil)},
-		{"get_config", "Returns the effective server configuration.", schema(nil, nil)},
-		{"get_logs", "Returns the most recent log lines from the ring buffer.", schema(nil, map[string]any{"lines": intProp("Number of lines (default 50)")})},
-		{"shutdown_server", "Gracefully shuts the server down.", schema(nil, nil)},
-	}
-	return map[string]any{"tools": tools}
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("send_to_connection", mcp.WithDescription("Sends a message to one connection."),
+			mcp.WithNumber("connID", mcp.Required(), mcp.Description("Connection id")),
+			mcp.WithNumber("msgID", mcp.Required(), mcp.Description("Message id")),
+			mcp.WithString("data", mcp.Required(), mcp.Description("Payload"))),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			connID, ok := argUint(req, "connID")
+			if !ok {
+				return nil, fmt.Errorf("connID (integer) is required")
+			}
+			msgID, ok := argUint(req, "msgID")
+			if !ok {
+				return nil, fmt.Errorf("msgID (integer) is required")
+			}
+			data, ok := argString(req, "data")
+			if !ok {
+				return nil, fmt.Errorf("data (string) is required")
+			}
+			return map[string]any{"ok": true}, s.toolSendToConnection(connID, uint32(msgID), data)
+		}))
 
-func (s *Server) toolsCall(params json.RawMessage) (any, *rpcError) {
-	if rpcErr := s.authorize("tools/call"); rpcErr != nil {
-		return nil, rpcErr
-	}
-	var p struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, &rpcError{Code: codeInvalidParams, Message: "invalid params: " + err.Error()}
-	}
+	s.mcpServer.AddTool(
+		mcp.NewTool("broadcast", mcp.WithDescription("Sends a message to every live connection."),
+			mcp.WithNumber("msgID", mcp.Required(), mcp.Description("Message id")),
+			mcp.WithString("data", mcp.Required(), mcp.Description("Payload"))),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			msgID, ok := argUint(req, "msgID")
+			if !ok {
+				return nil, fmt.Errorf("msgID (integer) is required")
+			}
+			data, ok := argString(req, "data")
+			if !ok {
+				return nil, fmt.Errorf("data (string) is required")
+			}
+			return s.toolBroadcast(uint32(msgID), data)
+		}))
 
-	var result any
-	var err error
-	switch p.Name {
-	case "server_info":
-		result, err = s.toolServerInfo()
-	case "list_connections":
-		result = s.toolListConnections()
-	case "get_connection":
-		err = s.toolGetConnection(p.Arguments, &result)
-	case "send_to_connection":
-		err = s.toolSendToConnection(p.Arguments)
-	case "broadcast":
-		err = s.toolBroadcast(p.Arguments, &result)
-	case "close_connection":
-		err = s.toolCloseConnection(p.Arguments)
-	case "get_metrics":
-		result = s.toolGetMetrics()
-	case "get_config":
-		result = s.toolGetConfig()
-	case "get_logs":
-		err = s.toolGetLogs(p.Arguments, &result)
-	case "shutdown_server":
-		err = s.toolShutdown()
-	default:
-		return nil, &rpcError{Code: codeInvalidParams, Message: "unknown tool: " + p.Name}
-	}
-	if err != nil {
-		return toolResult(fmt.Sprintf("error: %v", err), true), nil
-	}
-	return toolResult(encodePretty(result), false), nil
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("close_connection", mcp.WithDescription("Gracefully closes one connection."),
+			mcp.WithNumber("connID", mcp.Required(), mcp.Description("Connection id"))),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			id, ok := argUint(req, "connID")
+			if !ok {
+				return nil, fmt.Errorf("connID (integer) is required")
+			}
+			return map[string]any{"ok": true}, s.toolCloseConnection(id)
+		}))
 
-func toolResult(text string, isError bool) map[string]any {
-	return map[string]any{
-		"content": []map[string]any{{"type": "text", "text": text}},
-		"isError": isError,
-	}
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_metrics", mcp.WithDescription("Returns the server metrics (counters, gauges, histograms).")),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			return s.toolGetMetrics(), nil
+		}))
 
-func encodePretty(v any) string {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("%v", v)
-	}
-	return string(data)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_config", mcp.WithDescription("Returns the effective server configuration.")),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			return s.toolGetConfig(), nil
+		}))
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_logs", mcp.WithDescription("Returns the most recent log lines from the ring buffer."),
+			mcp.WithNumber("lines", mcp.Description("Number of lines (default 50)"))),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			lines := 50
+			if n, ok := argUint(req, "lines"); ok {
+				lines = int(n)
+			}
+			return s.toolGetLogs(lines)
+		}))
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("shutdown_server", mcp.WithDescription("Gracefully shuts the server down.")),
+		s.wrapTool(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			return map[string]any{"ok": true}, s.toolShutdown()
+		}))
 }
 
 func (s *Server) toolServerInfo() (any, error) {
@@ -129,68 +140,39 @@ func (s *Server) toolListConnections() any {
 	return map[string]any{"count": len(conns), "connections": conns}
 }
 
-func (s *Server) toolGetConnection(args json.RawMessage, out *any) error {
-	var a struct {
-		ConnID uint64 `json:"connID"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return err
-	}
-	conn, err := s.srv.GetConnMgr().Get(a.ConnID)
+func (s *Server) toolGetConnection(id uint64) (any, error) {
+	conn, err := s.srv.GetConnMgr().Get(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	*out = map[string]any{
+	return map[string]any{
 		"id":     conn.GetConnID(),
 		"remote": conn.GetRemoteAddr().String(),
 		"local":  conn.LocalAddr().String(),
-	}
-	return nil
+	}, nil
 }
 
-func (s *Server) toolSendToConnection(args json.RawMessage) error {
-	var a struct {
-		ConnID uint64 `json:"connID"`
-		MsgID  uint32 `json:"msgID"`
-		Data   string `json:"data"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return err
-	}
-	conn, err := s.srv.GetConnMgr().Get(a.ConnID)
+func (s *Server) toolSendToConnection(connID uint64, msgID uint32, data string) error {
+	conn, err := s.srv.GetConnMgr().Get(connID)
 	if err != nil {
 		return err
 	}
-	return conn.SendMsg(a.MsgID, []byte(a.Data))
+	return conn.SendMsg(msgID, []byte(data))
 }
 
-func (s *Server) toolBroadcast(args json.RawMessage, out *any) error {
-	var a struct {
-		MsgID uint32 `json:"msgID"`
-		Data  string `json:"data"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return err
-	}
+func (s *Server) toolBroadcast(msgID uint32, data string) (any, error) {
 	count := 0
 	s.srv.GetConnMgr().Range(func(_ uint64, c kiface.IConnection) bool {
-		if err := c.SendMsg(a.MsgID, []byte(a.Data)); err == nil {
+		if err := c.SendMsg(msgID, []byte(data)); err == nil {
 			count++
 		}
 		return true
 	})
-	*out = map[string]any{"sent": count}
-	return nil
+	return map[string]any{"sent": count}, nil
 }
 
-func (s *Server) toolCloseConnection(args json.RawMessage) error {
-	var a struct {
-		ConnID uint64 `json:"connID"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return err
-	}
-	conn, err := s.srv.GetConnMgr().Get(a.ConnID)
+func (s *Server) toolCloseConnection(id uint64) error {
+	conn, err := s.srv.GetConnMgr().Get(id)
 	if err != nil {
 		return err
 	}
@@ -214,20 +196,14 @@ func (s *Server) toolGetConfig() any {
 	return s.cfg
 }
 
-func (s *Server) toolGetLogs(args json.RawMessage, out *any) error {
-	var a struct {
-		Lines int `json:"lines"`
-	}
-	_ = json.Unmarshal(args, &a) // lines optional
-	if a.Lines <= 0 {
-		a.Lines = 50
+func (s *Server) toolGetLogs(lines int) (any, error) {
+	if lines <= 0 {
+		lines = 50
 	}
 	if s.ring == nil {
-		*out = map[string]any{"logs": []string{}}
-		return nil
+		return map[string]any{"logs": []string{}}, nil
 	}
-	*out = map[string]any{"logs": s.ring.Lines(a.Lines)}
-	return nil
+	return map[string]any{"logs": s.ring.Lines(lines)}, nil
 }
 
 func (s *Server) toolShutdown() error {

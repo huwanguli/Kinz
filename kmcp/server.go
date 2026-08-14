@@ -1,48 +1,46 @@
 // Package kmcp exposes a running Kinz server to AI tools via the Model
-// Context Protocol (MCP): JSON-RPC 2.0 over newline-delimited JSON. It is a
-// zero-dependency hand-rolled subset: initialize handshake, tools/list,
-// tools/call, resources/list, resources/read, ping, notifications.
+// Context Protocol (MCP), built on the mark3labs/mcp-go SDK. It is an
+// OPT-IN adapter: the core framework never imports it, and it is linked into
+// a binary only when the application explicitly imports it.
 //
-// Transports: stdio (Claude Desktop style) and TCP (same line-delimited JSON).
+// Transports: stdio (Claude Desktop convention) and streamable HTTP (the
+// standard modern MCP transport for remote clients).
 //
 // Usage:
 //
 //	mcp := kmcp.NewServer(srv, kmcp.WithConfig(cfg), kmcp.WithLogRing(ring))
-//	mcp.ListenAndServe("127.0.0.1:9001")   // TCP
-//	mcp.ServeStdio()                        // stdio
+//	go mcp.ServeHTTP("127.0.0.1:9001")   // streamable HTTP
+//	mcp.ServeStdio()                       // stdio
 package kmcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 
 	"kinz/kconf"
 	"kinz/kiface"
 	"kinz/klog"
 )
 
-// Supported MCP protocol versions (responds with the client's version when
-// known, otherwise with the latest).
-var supportedProtocols = map[string]bool{
-	"2024-11-05": true,
-	"2025-06-18": true,
-}
-
-const latestProtocol = "2025-06-18"
-
-// Server is an MCP server bound to a Kinz server.
+// Server is an MCP server bound to a Kinz server, wrapping an mcp-go
+// MCPServer with the Kinz management tools and resources registered.
 type Server struct {
-	srv     kiface.IServer
-	cfg     *kconf.Config
-	ring    *klog.RingBuffer
-	auth    AuthFunc
-	version string
-
+	srv       kiface.IServer
+	cfg       *kconf.Config
+	ring      *klog.RingBuffer
+	auth      AuthFunc
+	version   string
 	startTime time.Time
+
+	mcpServer *server.MCPServer
 }
 
-// AuthFunc authorizes a tool/resource method; a non-nil error rejects the call.
+// AuthFunc authorizes a tool/resource call; a non-nil error rejects it.
 type AuthFunc func(method string) error
 
 // Option customizes an MCP server.
@@ -58,8 +56,8 @@ func WithLogRing(ring *klog.RingBuffer) Option {
 	return func(s *Server) { s.ring = ring }
 }
 
-// WithAuth installs an authorization callback for tools/call and
-// resources/read (called with the method name, e.g. "tools/call").
+// WithAuth installs an authorization callback invoked for tools/call and
+// resources/read.
 func WithAuth(f AuthFunc) Option {
 	return func(s *Server) { s.auth = f }
 }
@@ -69,7 +67,8 @@ func WithVersion(v string) Option {
 	return func(s *Server) { s.version = v }
 }
 
-// NewServer creates an MCP server bound to a Kinz server.
+// NewServer creates an MCP server bound to a Kinz server, registering the
+// management tools and resources.
 func NewServer(srv kiface.IServer, opts ...Option) *Server {
 	s := &Server{
 		srv:       srv,
@@ -79,121 +78,92 @@ func NewServer(srv kiface.IServer, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.mcpServer = server.NewMCPServer("kinz-mcp", s.version,
+		server.WithInstructions("Manage a running Kinz server: inspect connections, send and broadcast messages, read metrics/config/logs, close connections, and shut down."),
+		server.WithResourceCapabilities(true, false))
+	s.registerTools()
+	s.registerResources()
 	return s
 }
 
-// rpcRequest is a JSON-RPC 2.0 request or notification.
-type rpcRequest struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id,omitempty"` // nil => notification
-	Method  string           `json:"method"`
-	Params  json.RawMessage  `json:"params,omitempty"`
-}
-
-// rpcError is a JSON-RPC 2.0 error object.
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type rpcResponse struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id"`
-	Result  any              `json:"result,omitempty"`
-	Error   *rpcError        `json:"error,omitempty"`
-}
-
-// JSON-RPC error codes.
-const (
-	codeParseError     = -32700
-	codeInvalidRequest = -32600
-	codeMethodNotFound = -32601
-	codeInvalidParams  = -32602
-	codeInternalError  = -32603
-	codeAuthDenied     = -32001
-)
-
-// handleMessage processes one JSON-RPC message and returns the response bytes,
-// or nil for notifications.
-func (s *Server) handleMessage(raw []byte) []byte {
-	var req rpcRequest
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return s.buildResponse(nil, nil, &rpcError{Code: codeParseError, Message: "parse error: " + err.Error()})
-	}
-	if req.Method == "" {
-		return s.buildResponse(nil, nil, &rpcError{Code: codeInvalidRequest, Message: "invalid request"})
-	}
-	if req.ID == nil {
-		s.notify(req)
-		return nil
-	}
-	result, rpcErr := s.dispatch(req)
-	return s.buildResponse(req.ID, result, rpcErr)
-}
-
-func (s *Server) buildResponse(id *json.RawMessage, result any, rpcErr *rpcError) []byte {
-	resp := rpcResponse{JSONRPC: "2.0", ID: id, Result: result, Error: rpcErr}
-	data, err := json.Marshal(resp)
-	if err != nil {
-		resp = rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: codeInternalError, Message: err.Error()}}
-		data, _ = json.Marshal(resp)
-	}
-	return data
-}
-
-func (s *Server) notify(req rpcRequest) {
-	// notifications carry no response; initialized is the only one we ack.
-}
-
-func (s *Server) dispatch(req rpcRequest) (any, *rpcError) {
-	switch req.Method {
-	case "initialize":
-		return s.handleInitialize(req.Params)
-	case "ping":
-		return map[string]any{}, nil
-	case "tools/list":
-		return s.toolsList(), nil
-	case "tools/call":
-		return s.toolsCall(req.Params)
-	case "resources/list":
-		return s.resourcesList(), nil
-	case "resources/read":
-		return s.resourcesRead(req.Params)
-	default:
-		return nil, &rpcError{Code: codeMethodNotFound, Message: fmt.Sprintf("method not found: %s", req.Method)}
-	}
-}
-
-func (s *Server) handleInitialize(params json.RawMessage) (any, *rpcError) {
-	var p struct {
-		ProtocolVersion string `json:"protocolVersion"`
-	}
-	// params may be absent; ignore decode errors.
-	_ = json.Unmarshal(params, &p)
-	proto := p.ProtocolVersion
-	if !supportedProtocols[proto] {
-		proto = latestProtocol
-	}
-	return map[string]any{
-		"protocolVersion": proto,
-		"capabilities": map[string]any{
-			"tools":     map[string]any{},
-			"resources": map[string]any{},
-		},
-		"serverInfo": map[string]any{
-			"name":    "kinz-mcp",
-			"version": s.version,
-		},
-	}, nil
-}
-
-// authorize rejects a call when the auth callback denies it.
-func (s *Server) authorize(method string) *rpcError {
+// authorize returns nil when the call is allowed.
+func (s *Server) authorize(method string) error {
 	if s.auth == nil {
 		return nil
 	}
-	if err := s.auth(method); err != nil {
-		return &rpcError{Code: codeAuthDenied, Message: "authorization denied: " + err.Error()}
+	return s.auth(method)
+}
+
+// textResult builds a tool result with plain text content.
+func textResult(text string, isError bool) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{mcp.NewTextContent(text)},
+		IsError: isError,
+	}
+}
+
+func encodePretty(v any) string {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(data)
+}
+
+// wrapTool adapts a plain tool implementation into an mcp-go handler with
+// authorization and error-to-result conversion.
+func (s *Server) wrapTool(f func(ctx context.Context, req mcp.CallToolRequest) (any, error)) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := s.authorize("tools/call"); err != nil {
+			return nil, fmt.Errorf("authorization denied: %w", err)
+		}
+		result, err := f(ctx, req)
+		if err != nil {
+			return textResult(fmt.Sprintf("error: %v", err), true), nil
+		}
+		return textResult(encodePretty(result), false), nil
+	}
+}
+
+// argMap extracts the tool arguments map (the wire type is `any`).
+func argMap(req mcp.CallToolRequest) map[string]any {
+	if m, ok := req.Params.Arguments.(map[string]any); ok {
+		return m
 	}
 	return nil
+}
+
+// argString extracts a string argument.
+func argString(req mcp.CallToolRequest, key string) (string, bool) {
+	args := argMap(req)
+	if args == nil {
+		return "", false
+	}
+	v, ok := args[key]
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+// argUint extracts an integer argument (JSON numbers decode as float64).
+func argUint(req mcp.CallToolRequest, key string) (uint64, bool) {
+	args := argMap(req)
+	if args == nil {
+		return 0, false
+	}
+	v, ok := args[key]
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return uint64(n), true
+	case int:
+		return uint64(n), true
+	case int64:
+		return uint64(n), true
+	}
+	return 0, false
 }

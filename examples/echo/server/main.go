@@ -6,7 +6,7 @@
 // exposes two management endpoints:
 //
 //   - Prometheus metrics: http://127.0.0.1:9000/metrics (AttachMetrics)
-//   - MCP server for AI tools: tcp://127.0.0.1:9001 (kmcp, JSON-RPC over TCP)
+//   - MCP server for AI tools: http://127.0.0.1:9001 (kmcp, streamable HTTP)
 //
 // Run:  go run ./examples/echo/server
 package main
@@ -75,7 +75,7 @@ func main() {
 	}
 	mcp := kmcp.NewServer(s, kmcp.WithConfig(cfg), kmcp.WithLogRing(ring))
 	go func() {
-		if err := mcp.ListenAndServe("127.0.0.1:9001"); err != nil {
+		if err := mcp.ServeHTTP("127.0.0.1:9001"); err != nil {
 			klog.L().Warn("mcp endpoint failed", "err", err)
 		}
 	}()
@@ -87,7 +87,7 @@ func main() {
 		"name", s.Name(),
 		"addr", fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		"metrics", "http://127.0.0.1:9000/metrics",
-		"mcp", "tcp://127.0.0.1:9001")
+		"mcp", "http://127.0.0.1:9001/mcp")
 	if err := s.Serve(ctx); err != nil {
 		fatal("serve", err)
 	}
