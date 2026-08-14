@@ -28,7 +28,7 @@ const (
 // buffered write queue with timeout, liveness tracking, and key-value
 // properties. Stop is idempotent and safe from any goroutine.
 type Connection struct {
-	server kiface.IServer
+	server connHost
 	conn   net.Conn
 	connID uint64
 	codec  kiface.ICodec
@@ -48,13 +48,13 @@ type Connection struct {
 	propertyLock sync.RWMutex
 }
 
-// NewConnection wraps a net.Conn with the server's codec (a per-connection
-// clone) and the message handler. The caller registers it in the ConnManager
-// before calling Start.
-func NewConnection(server kiface.IServer, conn net.Conn, connID uint64,
+// NewConnection wraps a net.Conn with the host's codec (a per-connection
+// clone) and the message handler. The caller registers it in the host's
+// ConnManager before calling Start.
+func NewConnection(host connHost, conn net.Conn, connID uint64,
 	codec kiface.ICodec, msgHdl kiface.IMsgHandle, cfg *kconf.Config) *Connection {
 	c := &Connection{
-		server:   server,
+		server:   host,
 		conn:     conn,
 		connID:   connID,
 		codec:    codec,
